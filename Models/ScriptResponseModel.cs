@@ -1,0 +1,50 @@
+using System.Text.Json.Serialization;
+using Newtonsoft.Json;
+
+namespace SQLDatabaseScriptGenerator.Models;
+
+/// <summary>
+/// Data Transfer Object for returning generated SQL scripts, diagnostics, and metrics to the client.
+/// </summary>
+public class ScriptResponseModel
+{
+    [JsonProperty("success")]
+    [JsonPropertyName("success")]
+    public bool Success { get; set; } = true;
+
+    [JsonProperty("isValid")]
+    [JsonPropertyName("isValid")]
+    public bool IsValid { get; set; } = true;
+
+    [JsonProperty("resultSql")]
+    [JsonPropertyName("resultSql")]
+    public string ResultSql { get; set; } = string.Empty;
+
+    [JsonProperty("formattedSql")]
+    [JsonPropertyName("formattedSql")]
+    public string FormattedSql { get; set; } = string.Empty;
+
+    [JsonProperty("batchCount")]
+    [JsonPropertyName("batchCount")]
+    public int BatchCount { get; set; }
+
+    [JsonProperty("statementCount")]
+    [JsonPropertyName("statementCount")]
+    public int StatementCount { get; set; }
+
+    [JsonProperty("errors")]
+    [JsonPropertyName("errors")]
+    public List<SqlParseError> Errors { get; set; } = new();
+
+    [JsonProperty("executionTimeMs")]
+    [JsonPropertyName("executionTimeMs")]
+    public double ExecutionTimeMs { get; set; }
+
+    [JsonProperty("message")]
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = string.Empty;
+
+    [JsonProperty("recommendations")]
+    [JsonPropertyName("recommendations")]
+    public List<string> Recommendations { get; set; } = new();
+}

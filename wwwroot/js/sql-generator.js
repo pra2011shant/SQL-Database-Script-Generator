@@ -269,13 +269,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
             try {
                 // Call server generation endpoint
-                const response = await fetch('/Home/ProcessSqlAction', {
+                const response = await fetch('/Home/ProcessSql', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         sqlInput: inputSql,
                         action: action,
-                        requirement: requirement
+                        requirement: requirement,
+                        databaseEngine: 'SqlServer2022',
+                        includeTryCatch: true,
+                        includeTransactions: true,
+                        includeComments: true
                     })
                 });
 
@@ -293,7 +297,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     if (data.isValid) {
                         statusDot.className = 'status-dot valid';
-                        statusText.innerText = 'Syntax Valid (ScriptDom)';
+                        statusText.innerText = `Syntax Valid (${data.executionTimeMs || 0}ms)`;
                         drawer.classList.remove('show');
                         document.getElementById('batchMetricBadge').innerText = `${data.batchCount || 1} Batches`;
                         document.getElementById('stmtMetricBadge').innerText = `${data.statementCount || 0} Statements`;
