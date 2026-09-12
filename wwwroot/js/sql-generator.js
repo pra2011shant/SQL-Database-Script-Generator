@@ -124,9 +124,6 @@ function initMonaco() {
             const btn = document.getElementById('btnExecuteAction');
             if (btn) btn.click();
         });
-
-        // Lazy load default template
-        loadSample('schema_customers');
     });
 }
 
