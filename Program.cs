@@ -16,6 +16,10 @@ builder.Services.AddHttpClient<IOllamaService, OllamaService>();
 builder.Services.AddScoped<ISqlParserService, SqlParserService>();
 builder.Services.AddScoped<ISqlEngineService, SqlEngineService>();
 builder.Services.AddSingleton<ISqlTemplateService, SqlTemplateService>();
+builder.Services.AddSingleton<ISqlStandardsService, SqlStandardsService>();
+builder.Services.AddSingleton<ISqlTranspilerService, SqlTranspilerService>();
+builder.Services.AddSingleton<ISchemaVisualizerService, SchemaVisualizerService>();
+builder.Services.AddScoped<ILiveDatabaseInspectorService, LiveDatabaseInspectorService>();
 
 var app = builder.Build();
 

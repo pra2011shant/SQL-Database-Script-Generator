@@ -4,7 +4,7 @@ using Newtonsoft.Json;
 namespace SQLDatabaseScriptGenerator.Models;
 
 /// <summary>
-/// Data Transfer Object for returning generated SQL scripts, diagnostics, and metrics to the client.
+/// Data Transfer Object for returning generated SQL scripts, diagnostics, metrics, and multi-engine transpilations.
 /// </summary>
 public class ScriptResponseModel
 {
@@ -39,6 +39,22 @@ public class ScriptResponseModel
     [JsonProperty("formattedSql")]
     [JsonPropertyName("formattedSql")]
     public string FormattedSql { get; set; } = string.Empty;
+
+    [JsonProperty("mermaidErDiagram")]
+    [JsonPropertyName("mermaidErDiagram")]
+    public string MermaidErDiagram { get; set; } = string.Empty;
+
+    [JsonProperty("postgresSql")]
+    [JsonPropertyName("postgresSql")]
+    public string PostgresSql { get; set; } = string.Empty;
+
+    [JsonProperty("mySql")]
+    [JsonPropertyName("mySql")]
+    public string MySql { get; set; } = string.Empty;
+
+    [JsonProperty("oracleSql")]
+    [JsonPropertyName("oracleSql")]
+    public string OracleSql { get; set; } = string.Empty;
 
     [JsonProperty("batchCount")]
     [JsonPropertyName("batchCount")]

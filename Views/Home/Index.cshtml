@@ -16,12 +16,15 @@
                 </label>
                 <select id="actionSelect" class="form-select form-select-custom">
                     <option value="create_table" selected>🏗️ Create Table Schema (PK, FK, Audit)</option>
-                    <option value="create_sp">⚡ Create Stored Procedures</option>
+                    <option value="create_sp">⚡ Create Stored Procedures (CRUD)</option>
                     <option value="create_indexes">🔍 Create Indexes & Tuning</option>
                     <option value="debug_sql">🛠️ Debug & Fix SQL (ScriptDom AST)</option>
                     <option value="optimize_query">🚀 Optimize Query (CTE & Hints)</option>
                     <option value="mock_data">🎲 Mock Data Generator (Batch INSERT)</option>
                     <option value="format_sql">🧹 Format & Beautify T-SQL</option>
+                    <option value="transpile_postgres">🐘 Transpile to PostgreSQL (pgSQL)</option>
+                    <option value="transpile_mysql">🐬 Transpile to MySQL (InnoDB)</option>
+                    <option value="transpile_oracle">🏛️ Transpile to Oracle (PL/SQL)</option>
                 </select>
             </div>
 
@@ -32,7 +35,7 @@
                 </label>
                 <input type="text" id="customRequirement" class="form-control form-control-custom" 
                        placeholder="e.g. Include TRY/CATCH error handling, transactions, and audit logging..." 
-                       value="Generate full CRUD stored procedures with TRY...CATCH and transaction handling." />
+                       value="Generate enterprise schema with named constraints and audit tracking." />
                 
                 <!-- Quick Prompt Chips -->
                 <div class="prompt-chips-wrapper">
@@ -129,12 +132,22 @@
                     <ul class="nav nav-pills" id="outputTabs" role="tablist" style="font-size: 0.8rem;">
                         <li class="nav-item" role="presentation">
                             <button class="nav-link active py-1 px-2 text-light" id="tab-code-btn" data-bs-toggle="tab" data-bs-target="#outputTabCode" type="button" role="tab">
-                                <i class="bi bi-file-earmark-check text-success me-1"></i> Generated Script
+                                <i class="bi bi-file-earmark-check text-success me-1"></i> Script
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link py-1 px-2 text-light" id="tab-diff-btn" data-bs-toggle="tab" data-bs-target="#outputTabDiff" type="button" role="tab">
+                                <i class="bi bi-layout-split text-info me-1"></i> Diff View
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link py-1 px-2 text-light" id="tab-diagram-btn" data-bs-toggle="tab" data-bs-target="#outputTabDiagram" type="button" role="tab">
+                                <i class="bi bi-diagram-3-fill text-primary me-1"></i> ER Diagram
                             </button>
                         </li>
                         <li class="nav-item" role="presentation">
                             <button class="nav-link py-1 px-2 text-light" id="tab-analysis-btn" data-bs-toggle="tab" data-bs-target="#outputTabAnalysis" type="button" role="tab">
-                                <i class="bi bi-lightbulb-fill text-warning me-1"></i> Analysis & Explanation
+                                <i class="bi bi-lightbulb-fill text-warning me-1"></i> Explanation
                             </button>
                         </li>
                     </ul>
@@ -159,10 +172,27 @@
                     <div id="outputMonacoContainer" class="monaco-container h-100"></div>
                 </div>
 
-                <!-- Tab 2: Structured Explanation & Recommendations Card -->
+                <!-- Tab 2: Side-by-Side Monaco Diff Editor -->
+                <div class="tab-pane fade flex-grow-1 d-flex flex-column h-100" id="outputTabDiff" role="tabpanel">
+                    <div id="diffMonacoContainer" class="monaco-container h-100"></div>
+                </div>
+
+                <!-- Tab 3: Visual Mermaid.js Schema Diagram -->
+                <div class="tab-pane fade p-3 overflow-auto flex-grow-1" id="outputTabDiagram" role="tabpanel" style="background: #0f172a;">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="text-primary mb-0"><i class="bi bi-diagram-3-fill me-1"></i> Interactive Entity-Relationship Model</h6>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="renderSchemaDiagram()">
+                            <i class="bi bi-arrow-clockwise"></i> Refresh Diagram
+                        </button>
+                    </div>
+                    <div id="mermaidDiagramContainer" class="d-flex justify-content-center p-3 rounded" style="background: #1e293b; min-height: 360px;">
+                        <div class="spinner-border text-primary my-auto" role="status"></div>
+                    </div>
+                </div>
+
+                <!-- Tab 4: Structured Explanation & Recommendations Card -->
                 <div class="tab-pane fade p-3 overflow-auto flex-grow-1" id="outputTabAnalysis" role="tabpanel" style="max-height: 460px; background: #0f172a;">
                     <div class="d-flex flex-column gap-3">
-                        <!-- Diagnosis Section -->
                         <div class="card bg-dark border-secondary">
                             <div class="card-header bg-dark border-secondary text-info fw-bold d-flex align-items-center gap-2">
                                 <i class="bi bi-clipboard2-pulse"></i> Diagnostic Assessment
@@ -172,7 +202,6 @@
                             </div>
                         </div>
 
-                        <!-- Plain Language Explanation -->
                         <div class="card bg-dark border-secondary">
                             <div class="card-header bg-dark border-secondary text-success fw-bold d-flex align-items-center gap-2">
                                 <i class="bi bi-journal-check"></i> Explanation of Changes
@@ -182,7 +211,6 @@
                             </div>
                         </div>
 
-                        <!-- Recommendations List -->
                         <div class="card bg-dark border-secondary">
                             <div class="card-header bg-dark border-secondary text-warning fw-bold d-flex align-items-center gap-2">
                                 <i class="bi bi-shield-check"></i> Best Practice Recommendations
@@ -215,7 +243,7 @@
                 </div>
                 <div class="d-flex align-items-center gap-3">
                     <span id="outputPosStatus">Ln 1, Col 1</span>
-                    <span>T-SQL</span>
+                    <span>T-SQL / Transpiled</span>
                 </div>
             </div>
         </div>

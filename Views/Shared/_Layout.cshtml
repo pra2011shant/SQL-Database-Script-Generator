@@ -41,8 +41,18 @@
                     </ul>
 
                     <div class="d-flex align-items-center gap-2">
+                        <!-- Live DB Inspector Trigger Button -->
+                        <button type="button" class="btn btn-outline-info btn-sm d-flex align-items-center gap-1" data-bs-toggle="modal" data-bs-target="#liveDbModal">
+                            <i class="bi bi-hdd-network"></i> Connect Live DB
+                        </button>
+
+                        <!-- Corporate Policy / RAG Trigger Button -->
+                        <button type="button" class="btn btn-outline-warning btn-sm d-flex align-items-center gap-1" data-bs-toggle="modal" data-bs-target="#standardsModal" onclick="loadCorporateStandards()">
+                            <i class="bi bi-sliders"></i> Corporate Policy
+                        </button>
+
                         <a href="https://github.com/pra2011shant/SQL-Database-Script-Generator" target="_blank" class="btn btn-outline-secondary btn-sm d-flex align-items-center gap-2 border-secondary-subtle text-light">
-                            <i class="bi bi-github fs-6"></i> GitHub Repo
+                            <i class="bi bi-github fs-6"></i> GitHub
                         </a>
                     </div>
                 </div>
@@ -54,10 +64,92 @@
         @RenderBody()
     </div>
 
+    <!-- Modal 1: Live DB Inspector -->
+    <div class="modal fade" id="liveDbModal" tabindex="-1" aria-labelledby="liveDbModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content bg-dark border-secondary">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title text-info" id="liveDbModalLabel"><i class="bi bi-hdd-network me-2"></i> Inspect Live Database Schema</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="liveDbConnString" class="form-label text-light">SQL Server Connection String (Read-Only)</label>
+                        <input type="text" class="form-control form-control-custom" id="liveDbConnString" 
+                               placeholder="Server=localhost;Database=MyDb;Trusted_Connection=True;TrustServerCertificate=True;" />
+                    </div>
+                    <button type="button" class="btn btn-info btn-sm" id="btnInspectLiveTables" onclick="inspectLiveDbTables()">
+                        <i class="bi bi-search"></i> Inspect Tables
+                    </button>
+
+                    <div id="liveDbTablesContainer" class="mt-3" style="display: none;">
+                        <label class="form-label text-light">Select Table to Load into Editor:</label>
+                        <div class="input-group">
+                            <select id="liveDbTableSelect" class="form-select form-select-custom"></select>
+                            <button type="button" class="btn btn-primary" onclick="loadSelectedLiveTableDdl()">
+                                <i class="bi bi-box-arrow-in-down"></i> Load DDL
+                            </button>
+                        </div>
+                    </div>
+                    <div id="liveDbStatusMsg" class="mt-2 text-warning" style="font-size: 0.85rem;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal 2: Corporate Standards & RAG Policy -->
+    <div class="modal fade" id="standardsModal" tabindex="-1" aria-labelledby="standardsModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content bg-dark border-secondary">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title text-warning" id="standardsModalLabel"><i class="bi bi-sliders me-2"></i> Corporate SQL Standards (RAG Policy)</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label text-secondary" style="font-size: 0.8rem;">Stored Procedure Prefix</label>
+                            <input type="text" class="form-control form-control-custom" id="stdSpPrefix" value="usp_" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label text-secondary" style="font-size: 0.8rem;">Index Prefix</label>
+                            <input type="text" class="form-control form-control-custom" id="stdIndexPrefix" value="IX_" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label text-secondary" style="font-size: 0.8rem;">Created At Column</label>
+                            <input type="text" class="form-control form-control-custom" id="stdCreatedAt" value="CreatedAtUtc" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label text-secondary" style="font-size: 0.8rem;">Soft Delete Column</label>
+                            <input type="text" class="form-control form-control-custom" id="stdSoftDelete" value="IsDeleted" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label text-secondary" style="font-size: 0.8rem;">Created By Column</label>
+                            <input type="text" class="form-control form-control-custom" id="stdCreatedBy" value="CreatedBy" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label text-secondary" style="font-size: 0.8rem;">Optimistic Concurrency</label>
+                            <div class="form-check form-switch mt-2">
+                                <input class="form-check-input" type="checkbox" id="stdConcurrency" checked>
+                                <label class="form-check-label text-light" for="stdConcurrency">Include [RowVersion]</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-warning btn-sm" onclick="saveCorporateStandards()">
+                        <i class="bi bi-check2-circle"></i> Save Policy
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <footer class="app-footer text-center">
         <div class="container-fluid d-flex flex-column flex-md-row justify-content-between align-items-center">
             <div>
-                &copy; @DateTime.UtcNow.Year - <strong>SQL Database Script Generator</strong> | Built with ASP.NET Core & ScriptDom
+                &copy; @DateTime.UtcNow.Year - <strong>SQL Database Script Generator</strong> | Built with ASP.NET Core, ScriptDom & Ollama
             </div>
             <div class="text-muted mt-2 mt-md-0">
                 <span><i class="bi bi-cpu me-1"></i> T-SQL 160 AST Engine</span> | 
@@ -70,6 +162,12 @@
     <script src="~/lib/jquery/dist/jquery.min.js"></script>
     <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
     
+    <!-- Mermaid.js for Schema ER Diagram -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+    </script>
+
     <!-- Monaco Editor Loader via CDN -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
     <script src="~/js/sql-generator.js" asp-append-version="true"></script>

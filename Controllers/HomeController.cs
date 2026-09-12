@@ -10,15 +10,21 @@ public class HomeController : Controller
     private readonly ILogger<HomeController> _logger;
     private readonly ISqlEngineService _sqlEngineService;
     private readonly ISqlTemplateService _sqlTemplateService;
+    private readonly ISqlStandardsService _standardsService;
+    private readonly ILiveDatabaseInspectorService _liveInspectorService;
 
     public HomeController(
-        ILogger<HomeController> logger, 
+        ILogger<HomeController> logger,
         ISqlEngineService sqlEngineService,
-        ISqlTemplateService sqlTemplateService)
+        ISqlTemplateService sqlTemplateService,
+        ISqlStandardsService standardsService,
+        ILiveDatabaseInspectorService liveInspectorService)
     {
         _logger = logger;
         _sqlEngineService = sqlEngineService;
         _sqlTemplateService = sqlTemplateService;
+        _standardsService = standardsService;
+        _liveInspectorService = liveInspectorService;
     }
 
     public IActionResult Index()
@@ -26,9 +32,6 @@ public class HomeController : Controller
         return View();
     }
 
-    /// <summary>
-    /// Fetches sample schema templates securely from the backend service.
-    /// </summary>
     [HttpGet]
     public IActionResult GetSampleTemplate(string key)
     {
@@ -42,10 +45,59 @@ public class HomeController : Controller
         return Json(new { key = key, sql = template });
     }
 
-    /// <summary>
-    /// Asynchronous endpoint to process SQL scripts and return structured JSON response via AJAX/Fetch API.
-    /// Routes requests through ISqlEngineService (ScriptDom parser + Ollama LLM / prompt engineering).
-    /// </summary>
+    [HttpGet]
+    public IActionResult GetCorporateStandards()
+    {
+        return Json(_standardsService.GetStandards());
+    }
+
+    [HttpPost]
+    [IgnoreAntiforgeryToken]
+    public IActionResult UpdateCorporateStandards([FromBody] CorporateSqlStandards standards)
+    {
+        if (standards == null)
+            return BadRequest(new { Message = "Invalid standards payload." });
+
+        _standardsService.UpdateStandards(standards);
+        return Ok(new { Message = "Corporate SQL standards updated successfully." });
+    }
+
+    [HttpPost]
+    [IgnoreAntiforgeryToken]
+    public async Task<IActionResult> InspectLiveDatabaseTables([FromBody] LiveDbInspectRequest request, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request?.ConnectionString))
+            return BadRequest(new { Message = "Connection string is required." });
+
+        try
+        {
+            var tables = await _liveInspectorService.GetTableNamesAsync(request.ConnectionString, cancellationToken);
+            return Ok(new { Success = true, Tables = tables });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { Success = false, Message = ex.Message });
+        }
+    }
+
+    [HttpPost]
+    [IgnoreAntiforgeryToken]
+    public async Task<IActionResult> ExtractLiveTableDdl([FromBody] LiveDbInspectRequest request, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request?.ConnectionString) || string.IsNullOrWhiteSpace(request?.TableName))
+            return BadRequest(new { Message = "Connection string and table name are required." });
+
+        try
+        {
+            var ddl = await _liveInspectorService.GenerateTableDdlAsync(request.ConnectionString, request.TableName, cancellationToken);
+            return Ok(new { Success = true, Ddl = ddl });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { Success = false, Message = ex.Message });
+        }
+    }
+
     [HttpPost]
     [IgnoreAntiforgeryToken]
     public async Task<IActionResult> ProcessSql([FromBody] ScriptRequestModel request, CancellationToken cancellationToken)

@@ -1,17 +1,22 @@
 /**
- * SQL Database Script Generator - High-Performance Monaco Controller
- * - Zero hardcoded SQL queries (100% backend driven)
- * - Debounced input tracking (Zero UI lag / No screen freezes)
- * - Lazy loaded sample templates with local caching
- * - Non-blocking asynchronous AJAX fetch with AbortController
+ * SQL Database Script Generator - Enterprise Controller
+ * - Monaco Editor + Monaco Diff Editor (Side-by-side comparison)
+ * - Mermaid.js Interactive Entity-Relationship (ER) Diagram
+ * - Live SQL Server Database Schema Inspector
+ * - Corporate Policy / RAG Rules Manager
+ * - Multi-Database Engine Transpiler
  */
 
 let inputEditor = null;
 let outputEditor = null;
+let diffEditor = null;
+let originalDiffModel = null;
+let modifiedDiffModel = null;
 let activeAbortController = null;
+let currentMermaidCode = "erDiagram\n    CUSTOMERS ||--o{ ORDERS : places";
 const templateCache = new Map();
 
-// Debounce helper to keep UI 60fps smooth
+// Debounce helper
 function debounce(func, wait) {
     let timeout;
     return function (...args) {
@@ -25,7 +30,6 @@ function initMonaco() {
     require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' } });
 
     require(['vs/editor/editor.main'], function () {
-        // Theme definition
         monaco.editor.defineTheme('sqlDarkModern', {
             base: 'vs-dark',
             inherit: true,
@@ -46,7 +50,6 @@ function initMonaco() {
             }
         });
 
-        // Common Editor Options
         const commonOptions = {
             language: 'sql',
             theme: 'sqlDarkModern',
@@ -75,7 +78,21 @@ function initMonaco() {
             readOnly: false
         });
 
-        // Debounced metrics update (Prevents typing lag)
+        // Create Monaco Diff Editor
+        diffEditor = monaco.editor.createDiffEditor(document.getElementById('diffMonacoContainer'), {
+            theme: 'sqlDarkModern',
+            automaticLayout: true,
+            readOnly: true,
+            renderSideBySide: true,
+            fontSize: 12,
+            fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace"
+        });
+
+        originalDiffModel = monaco.editor.createModel('-- Original Input Script', 'sql');
+        modifiedDiffModel = monaco.editor.createModel('-- Generated / Optimized Script', 'sql');
+        diffEditor.setModel({ original: originalDiffModel, modified: modifiedDiffModel });
+
+        // Debounced metrics update
         const updateMetricsDebounced = debounce(() => {
             if (!inputEditor) return;
             const model = inputEditor.getModel();
@@ -89,7 +106,7 @@ function initMonaco() {
 
         inputEditor.onDidChangeModelContent(updateMetricsDebounced);
 
-        // Cursor position tracking
+        // Position tracking
         inputEditor.onDidChangeCursorPosition(e => {
             const pos = e.position;
             const posElem = document.getElementById('inputPosStatus');
@@ -102,15 +119,28 @@ function initMonaco() {
             if (posElem) posElem.innerText = `Ln ${pos.lineNumber}, Col ${pos.column}`;
         });
 
-        // Shortcut: Ctrl + Enter to Generate
+        // Shortcut: Ctrl + Enter
         inputEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, function () {
             const btn = document.getElementById('btnExecuteAction');
             if (btn) btn.click();
         });
 
-        // Lazy load default customer orders schema
+        // Lazy load default template
         loadSample('schema_customers');
     });
+}
+
+// Render Mermaid ER Diagram
+async function renderSchemaDiagram() {
+    const container = document.getElementById('mermaidDiagramContainer');
+    if (!container || !window.mermaid) return;
+
+    try {
+        container.innerHTML = `<div class="mermaid text-light">${currentMermaidCode}</div>`;
+        await mermaid.run({ nodes: container.querySelectorAll('.mermaid') });
+    } catch (err) {
+        container.innerHTML = `<div class="text-danger p-3"><i class="bi bi-exclamation-octagon me-2"></i> Error rendering ER diagram: ${err.message}</div>`;
+    }
 }
 
 // Lazy Load & Cache Sample Templates from Backend
@@ -134,7 +164,6 @@ async function loadSample(sampleKey) {
             inputEditor.setValue(sqlText);
         }
 
-        // Set contextual requirement text
         const actionSelect = document.getElementById('actionSelect');
         const reqInput = document.getElementById('customRequirement');
 
@@ -148,8 +177,8 @@ async function loadSample(sampleKey) {
             if (actionSelect) actionSelect.value = 'create_sp';
             if (reqInput) reqInput.value = 'Generate CRUD stored procedures with TRY...CATCH error handling and transactions.';
         } else {
-            if (actionSelect) actionSelect.value = 'create_sp';
-            if (reqInput) reqInput.value = 'Generate full CRUD stored procedures with TRY...CATCH and transaction handling.';
+            if (actionSelect) actionSelect.value = 'create_table';
+            if (reqInput) reqInput.value = 'Generate enterprise schema with named constraints and audit tracking.';
         }
     } catch (err) {
         console.error('Error loading template:', err);
@@ -236,6 +265,7 @@ function switchLayout(mode) {
 
     if (inputEditor) requestAnimationFrame(() => inputEditor.layout());
     if (outputEditor) requestAnimationFrame(() => outputEditor.layout());
+    if (diffEditor) requestAnimationFrame(() => diffEditor.layout());
 }
 
 // Jump to line in input editor
@@ -247,17 +277,134 @@ function jumpToLine(line, col) {
     }
 }
 
+// Live DB Inspection API calls
+async function inspectLiveDbTables() {
+    const connStr = document.getElementById('liveDbConnString').value.trim();
+    const statusMsg = document.getElementById('liveDbStatusMsg');
+    const tableContainer = document.getElementById('liveDbTablesContainer');
+    const select = document.getElementById('liveDbTableSelect');
+
+    if (!connStr) {
+        statusMsg.innerText = 'Please provide a valid SQL Server connection string.';
+        return;
+    }
+
+    statusMsg.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Connecting and inspecting tables...';
+    try {
+        const response = await fetch('/Home/InspectLiveDatabaseTables', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ connectionString: connStr })
+        });
+
+        const data = await response.json();
+        if (response.ok && data.success) {
+            select.innerHTML = data.tables.map(t => `<option value="${t}">${t}</option>`).join('');
+            tableContainer.style.display = 'block';
+            statusMsg.innerHTML = `<span class="text-success"><i class="bi bi-check-circle"></i> Found ${data.tables.length} tables.</span>`;
+        } else {
+            statusMsg.innerText = data.message || 'Failed to inspect tables.';
+        }
+    } catch (err) {
+        statusMsg.innerText = `Connection failed: ${err.message}`;
+    }
+}
+
+async function loadSelectedLiveTableDdl() {
+    const connStr = document.getElementById('liveDbConnString').value.trim();
+    const tableName = document.getElementById('liveDbTableSelect').value;
+    const statusMsg = document.getElementById('liveDbStatusMsg');
+
+    if (!tableName) return;
+
+    statusMsg.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span> Extracting DDL for ${tableName}...`;
+    try {
+        const response = await fetch('/Home/ExtractLiveTableDdl', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ connectionString: connStr, tableName: tableName })
+        });
+
+        const data = await response.json();
+        if (response.ok && data.success) {
+            if (inputEditor) inputEditor.setValue(data.ddl);
+            statusMsg.innerHTML = `<span class="text-success"><i class="bi bi-check-circle"></i> Loaded into Editor!</span>`;
+            bootstrap.Modal.getInstance(document.getElementById('liveDbModal')).hide();
+        } else {
+            statusMsg.innerText = data.message || 'Failed to extract DDL.';
+        }
+    } catch (err) {
+        statusMsg.innerText = `Error: ${err.message}`;
+    }
+}
+
+// Corporate Standards Load & Save
+async function loadCorporateStandards() {
+    try {
+        const response = await fetch('/Home/GetCorporateStandards');
+        if (response.ok) {
+            const data = await response.json();
+            document.getElementById('stdSpPrefix').value = data.spPrefix || 'usp_';
+            document.getElementById('stdIndexPrefix').value = data.indexPrefix || 'IX_';
+            document.getElementById('stdCreatedAt').value = data.createdAtColumn || 'CreatedAtUtc';
+            document.getElementById('stdSoftDelete').value = data.softDeleteColumn || 'IsDeleted';
+            document.getElementById('stdCreatedBy').value = data.createdByColumn || 'CreatedBy';
+            document.getElementById('stdConcurrency').checked = data.enableOptimisticConcurrency ?? true;
+        }
+    } catch (err) {
+        console.error('Failed to load standards:', err);
+    }
+}
+
+async function saveCorporateStandards() {
+    const payload = {
+        spPrefix: document.getElementById('stdSpPrefix').value.trim(),
+        indexPrefix: document.getElementById('stdIndexPrefix').value.trim(),
+        createdAtColumn: document.getElementById('stdCreatedAt').value.trim(),
+        softDeleteColumn: document.getElementById('stdSoftDelete').value.trim(),
+        createdByColumn: document.getElementById('stdCreatedBy').value.trim(),
+        enableOptimisticConcurrency: document.getElementById('stdConcurrency').checked
+    };
+
+    try {
+        const response = await fetch('/Home/UpdateCorporateStandards', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (response.ok) {
+            alert('Corporate Standards & RAG Policy updated successfully!');
+            bootstrap.Modal.getInstance(document.getElementById('standardsModal')).hide();
+        }
+    } catch (err) {
+        alert(`Failed to save: ${err.message}`);
+    }
+}
+
 // DOM Event Bindings
 document.addEventListener('DOMContentLoaded', () => {
     initMonaco();
 
-    // Monaco layout trigger on output tab change
+    // Monaco layout & diff / diagram triggers on output tab change
     const codeTabBtn = document.getElementById('tab-code-btn');
     if (codeTabBtn) {
         codeTabBtn.addEventListener('shown.bs.tab', () => {
-            if (outputEditor) {
-                requestAnimationFrame(() => outputEditor.layout());
-            }
+            if (outputEditor) requestAnimationFrame(() => outputEditor.layout());
+        });
+    }
+
+    const diffTabBtn = document.getElementById('tab-diff-btn');
+    if (diffTabBtn) {
+        diffTabBtn.addEventListener('shown.bs.tab', () => {
+            if (diffEditor) requestAnimationFrame(() => diffEditor.layout());
+        });
+    }
+
+    const diagramTabBtn = document.getElementById('tab-diagram-btn');
+    if (diagramTabBtn) {
+        diagramTabBtn.addEventListener('shown.bs.tab', () => {
+            renderSchemaDiagram();
         });
     }
 
@@ -274,13 +421,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            // Abort previous in-flight request if any
             if (activeAbortController) {
                 activeAbortController.abort();
             }
             activeAbortController = new AbortController();
 
-            // Set loading state
             btnExec.disabled = true;
             btnExec.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Processing...`;
 
@@ -302,9 +447,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (response.ok) {
                     const data = await response.json();
+                    const resultText = data.resultSql || data.formattedSql || '-- No output returned';
+
                     if (outputEditor) {
-                        outputEditor.setValue(data.resultSql || data.formattedSql || '-- No output returned');
+                        outputEditor.setValue(resultText);
                     }
+
+                    // Update Diff Editor Models
+                    if (originalDiffModel && modifiedDiffModel) {
+                        originalDiffModel.setValue(inputSql);
+                        modifiedDiffModel.setValue(resultText);
+                    }
+
+                    // Update ER Diagram
+                    currentMermaidCode = data.mermaidErDiagram || "erDiagram\n    TARGET_TABLE {\n        int ID PK\n    }";
+                    renderSchemaDiagram();
 
                     // Populate Analysis & Explanation Cards
                     const diagElem = document.getElementById('analysisDiagnosisText');

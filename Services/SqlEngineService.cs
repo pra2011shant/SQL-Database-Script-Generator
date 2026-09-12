@@ -6,22 +6,31 @@ using SQLDatabaseScriptGenerator.Models;
 namespace SQLDatabaseScriptGenerator.Services;
 
 /// <summary>
-/// Core orchestrator service for script generation, AI prompt engineering, and offline AST fallback.
-/// Fully dynamic: extracts actual columns and data types from user schema without hardcoded dummy scripts.
+/// Core orchestrator service for script generation, AI prompt engineering, multi-engine transpilation, and offline AST fallback.
+/// Fully dynamic: extracts actual columns, applies corporate standards, generates ER diagrams, and transpiles.
 /// </summary>
 public class SqlEngineService : ISqlEngineService
 {
     private readonly ISqlParserService _sqlParserService;
     private readonly IOllamaService _ollamaService;
+    private readonly ISqlStandardsService _standardsService;
+    private readonly ISqlTranspilerService _transpilerService;
+    private readonly ISchemaVisualizerService _schemaVisualizerService;
     private readonly ILogger<SqlEngineService> _logger;
 
     public SqlEngineService(
         ISqlParserService sqlParserService,
         IOllamaService ollamaService,
+        ISqlStandardsService standardsService,
+        ISqlTranspilerService transpilerService,
+        ISchemaVisualizerService schemaVisualizerService,
         ILogger<SqlEngineService> logger)
     {
         _sqlParserService = sqlParserService;
         _ollamaService = ollamaService;
+        _standardsService = standardsService;
+        _transpilerService = transpilerService;
+        _schemaVisualizerService = schemaVisualizerService;
         _logger = logger;
     }
 
@@ -59,6 +68,24 @@ public class SqlEngineService : ISqlEngineService
                 await HandleCreateTableAsync(response, request, tableMeta, requirement, validation, cancellationToken);
                 break;
 
+            case "transpile_postgres":
+                response.ResultSql = _transpilerService.TranspileToPostgreSql(request.SqlInput);
+                response.Explanation = "Transpiled Microsoft T-SQL syntax and data types to native PostgreSQL (pgSQL 15+).";
+                response.Recommendations.Add("Review PostgreSQL sequences and search_path schemas.");
+                break;
+
+            case "transpile_mysql":
+                response.ResultSql = _transpilerService.TranspileToMySql(request.SqlInput);
+                response.Explanation = "Transpiled Microsoft T-SQL syntax to MySQL 8.0+ (InnoDB engine).";
+                response.Recommendations.Add("Ensure proper character set (utf8mb4) and collation are configured in MySQL.");
+                break;
+
+            case "transpile_oracle":
+                response.ResultSql = _transpilerService.TranspileToOracle(request.SqlInput);
+                response.Explanation = "Transpiled Microsoft T-SQL syntax to Oracle Database (PL/SQL 19c/21c).";
+                response.Recommendations.Add("Ensure Oracle tablespaces and user schemas are configured.");
+                break;
+
             case "debug_sql":
                 await HandleDebugSqlAsync(response, request, requirement, validation, cancellationToken);
                 break;
@@ -89,6 +116,17 @@ public class SqlEngineService : ISqlEngineService
                 break;
         }
 
+        // Generate Visual ER Diagram (Mermaid.js)
+        response.MermaidErDiagram = _schemaVisualizerService.GenerateMermaidErDiagram(request.SqlInput);
+
+        // Populate Multi-Engine Transpilations for instant preview
+        if (!string.IsNullOrWhiteSpace(response.ResultSql))
+        {
+            response.PostgresSql = _transpilerService.TranspileToPostgreSql(response.ResultSql);
+            response.MySql = _transpilerService.TranspileToMySql(response.ResultSql);
+            response.OracleSql = _transpilerService.TranspileToOracle(response.ResultSql);
+        }
+
         stopwatch.Stop();
         response.ExecutionTimeMs = Math.Round(stopwatch.Elapsed.TotalMilliseconds, 2);
         response.Message = validation.IsValid ? "SQL script processed successfully." : "Processed with syntax diagnostic alerts.";
@@ -101,11 +139,13 @@ public class SqlEngineService : ISqlEngineService
     private async Task HandleCreateTableAsync(
         ScriptResponseModel response, ScriptRequestModel req, TableMetadata meta, string requirement, SqlValidationResult validation, CancellationToken ct)
     {
+        var standards = _standardsService.GetStandards();
         var tableName = meta.TableName;
         response.Diagnosis = $"Designing enterprise DDL table schema for [{tableName}] with PK, FK, constraints, and audit columns.";
 
         string systemPrompt = "You are a Principal Microsoft SQL Server Database Architect. " +
             "Generate production-grade T-SQL CREATE TABLE scripts with explicit PRIMARY KEY, FOREIGN KEY constraints, CHECK constraints, DEFAULT constraints, and standard Audit columns. " +
+            $"{_standardsService.BuildStandardsContextPrompt()}\n" +
             "Prefix key design choices with '-- BEST PRACTICE:' comment markers. Return ONLY executable T-SQL.";
 
         string userPrompt = $"Generate a complete CREATE TABLE schema for entity or table [{tableName}]:\n\n{req.SqlInput}\n\nRequirements: {requirement}";
@@ -120,7 +160,7 @@ public class SqlEngineService : ISqlEngineService
             return;
         }
 
-        // Dynamic Deterministic Table Generator
+        // Dynamic Deterministic Table Generator adhering to standards
         var sb = new StringBuilder(1536);
         sb.AppendLine($"-- ===========================================================================");
         sb.AppendLine($"-- Enterprise Table Schema Definition: dbo.[{tableName}]");
@@ -137,7 +177,6 @@ public class SqlEngineService : ISqlEngineService
         sb.AppendLine($"        [{meta.PrimaryKeyColumn}] INT IDENTITY(1,1) NOT NULL,");
         sb.AppendLine();
 
-        // Dynamically add parsed columns if present, or clean defaults
         var nonPkCols = meta.Columns.Where(c => !c.IsPrimaryKey && !c.Name.Equals(meta.PrimaryKeyColumn, StringComparison.OrdinalIgnoreCase)).ToList();
         if (nonPkCols.Count > 0)
         {
@@ -160,16 +199,19 @@ public class SqlEngineService : ISqlEngineService
         }
 
         sb.AppendLine($"        -- BEST PRACTICE: Standardized Enterprise Audit & Soft-Delete Columns");
-        sb.AppendLine($"        [IsActive] BIT NOT NULL CONSTRAINT DF_{tableName}_IsActive DEFAULT (1),");
-        sb.AppendLine($"        [IsDeleted] BIT NOT NULL CONSTRAINT DF_{tableName}_IsDeleted DEFAULT (0),");
-        sb.AppendLine($"        [CreatedAtUtc] DATETIME2(7) NOT NULL CONSTRAINT DF_{tableName}_CreatedAtUtc DEFAULT (SYSUTCDATETIME()),");
-        sb.AppendLine($"        [CreatedBy] NVARCHAR(100) NOT NULL CONSTRAINT DF_{tableName}_CreatedBy DEFAULT (SYSTEM_USER),");
-        sb.AppendLine($"        [ModifiedAtUtc] DATETIME2(7) NULL,");
-        sb.AppendLine($"        [ModifiedBy] NVARCHAR(100) NULL,");
-        sb.AppendLine($"        [RowVersion] ROWVERSION NOT NULL, -- Optimistic Concurrency Control");
+        sb.AppendLine($"        [IsActive] BIT NOT NULL CONSTRAINT {standards.DefaultConstraintPrefix}{tableName}_IsActive DEFAULT (1),");
+        sb.AppendLine($"        [{standards.SoftDeleteColumn}] BIT NOT NULL CONSTRAINT {standards.DefaultConstraintPrefix}{tableName}_{standards.SoftDeleteColumn} DEFAULT (0),");
+        sb.AppendLine($"        [{standards.CreatedAtColumn}] DATETIME2(7) NOT NULL CONSTRAINT {standards.DefaultConstraintPrefix}{tableName}_{standards.CreatedAtColumn} DEFAULT (SYSUTCDATETIME()),");
+        sb.AppendLine($"        [{standards.CreatedByColumn}] NVARCHAR(100) NOT NULL CONSTRAINT {standards.DefaultConstraintPrefix}{tableName}_{standards.CreatedByColumn} DEFAULT (SYSTEM_USER),");
+        sb.AppendLine($"        [{standards.ModifiedAtColumn}] DATETIME2(7) NULL,");
+        sb.AppendLine($"        [{standards.ModifiedByColumn}] NVARCHAR(100) NULL,");
+        if (standards.EnableOptimisticConcurrency)
+        {
+            sb.AppendLine($"        [RowVersion] ROWVERSION NOT NULL, -- Optimistic Concurrency Control");
+        }
         sb.AppendLine();
         sb.AppendLine($"        -- BEST PRACTICE: Explicit Primary Key constraint definition");
-        sb.AppendLine($"        CONSTRAINT PK_{tableName}_{meta.PrimaryKeyColumn} PRIMARY KEY CLUSTERED ([{meta.PrimaryKeyColumn}] ASC)");
+        sb.AppendLine($"        CONSTRAINT {standards.PkPrefix}{tableName}_{meta.PrimaryKeyColumn} PRIMARY KEY CLUSTERED ([{meta.PrimaryKeyColumn}] ASC)");
         sb.AppendLine($"    ){(req.UsePageCompression ? " WITH (DATA_COMPRESSION = PAGE)" : "")};");
         sb.AppendLine($"    PRINT 'Table dbo.[{tableName}] created successfully.';");
         sb.AppendLine($"END");
@@ -180,29 +222,31 @@ public class SqlEngineService : ISqlEngineService
         sb.AppendLine($"GO\n");
 
         sb.AppendLine($"-- BEST PRACTICE: Non-clustered index for status & active records");
-        sb.AppendLine($"IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_{tableName}_CreatedAtUtc' AND object_id = OBJECT_ID('dbo.[{tableName}]'))");
+        sb.AppendLine($"IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = '{standards.IndexPrefix}{tableName}_{standards.CreatedAtColumn}' AND object_id = OBJECT_ID('dbo.[{tableName}]'))");
         sb.AppendLine($"BEGIN");
-        sb.AppendLine($"    CREATE NONCLUSTERED INDEX IX_{tableName}_CreatedAtUtc");
-        sb.AppendLine($"    ON dbo.[{tableName}] ([CreatedAtUtc] DESC)");
-        sb.AppendLine($"    WHERE [IsDeleted] = 0; -- Filtered Index");
+        sb.AppendLine($"    CREATE NONCLUSTERED INDEX {standards.IndexPrefix}{tableName}_{standards.CreatedAtColumn}");
+        sb.AppendLine($"    ON dbo.[{tableName}] ([{standards.CreatedAtColumn}] DESC)");
+        sb.AppendLine($"    WHERE [{standards.SoftDeleteColumn}] = 0; -- Filtered Index for active records");
         sb.AppendLine($"END;");
         sb.AppendLine($"GO");
 
         response.ResultSql = sb.ToString();
-        response.Explanation = $"Created enterprise table schema for [{tableName}] with dynamic columns, named Primary Key, Audit columns, and Filtered Index.";
-        response.Recommendations.Add("Always name constraints explicitly (PK_, UQ_, CK_, DF_) to simplify database migrations.");
+        response.Explanation = $"Created enterprise table schema for [{tableName}] adhering to corporate naming rules ({standards.PkPrefix}, {standards.DefaultConstraintPrefix}), Audit columns, and Filtered Index.";
+        response.Recommendations.Add("Always name constraints explicitly to simplify database migrations.");
         response.Recommendations.Add("Use Filtered Indexes (WHERE IsDeleted = 0) to speed up queries when using soft deletes.");
     }
 
     private async Task HandleCreateStoredProceduresAsync(
         ScriptResponseModel response, ScriptRequestModel req, TableMetadata meta, string requirement, SqlValidationResult validation, CancellationToken ct)
     {
+        var standards = _standardsService.GetStandards();
         var tableName = meta.TableName;
         var pkCol = meta.PrimaryKeyColumn;
         response.Diagnosis = $"Analyzed input schema for [{tableName}]. Generating modular CRUD procedures with error handling.";
 
         string systemPrompt = "You are a Principal Database Architect. " +
             "Generate production-grade T-SQL stored procedures with TRY/CATCH error handling, explicit transaction scopes, and pagination. " +
+            $"{_standardsService.BuildStandardsContextPrompt()}\n" +
             "Prefix key design choices with '-- BEST PRACTICE:' comment markers. Return executable T-SQL.";
 
         string userPrompt = $"Generate stored procedures for table [{tableName}] from schema:\n\n{req.SqlInput}\n\nRequirements: {requirement}";
@@ -217,7 +261,7 @@ public class SqlEngineService : ISqlEngineService
             return;
         }
 
-        // Dynamic Deterministic Generation using actual columns
+        // Dynamic Deterministic Generation using actual columns & standards
         var nonIdentityCols = meta.Columns.Where(c => !c.IsIdentity).ToList();
         var insertCols = string.Join(", ", nonIdentityCols.Select(c => $"[{c.Name}]"));
         var insertVals = string.Join(", ", nonIdentityCols.Select(c => $"@{c.Name}"));
@@ -235,7 +279,7 @@ public class SqlEngineService : ISqlEngineService
         sb.AppendLine("GO\n");
 
         // 1. Get By ID
-        sb.AppendLine($"CREATE OR ALTER PROCEDURE dbo.usp_{tableName}_GetByID");
+        sb.AppendLine($"CREATE OR ALTER PROCEDURE dbo.{standards.SpPrefix}{tableName}_GetByID");
         sb.AppendLine($"    @{pkCol} INT");
         sb.AppendLine($"AS");
         sb.AppendLine($"BEGIN");
@@ -246,7 +290,7 @@ public class SqlEngineService : ISqlEngineService
         sb.AppendLine("GO\n");
 
         // 2. Search & Pagination
-        sb.AppendLine($"CREATE OR ALTER PROCEDURE dbo.usp_{tableName}_Search");
+        sb.AppendLine($"CREATE OR ALTER PROCEDURE dbo.{standards.SpPrefix}{tableName}_Search");
         sb.AppendLine($"    @SearchTerm NVARCHAR(100) = NULL,");
         sb.AppendLine($"    @PageIndex INT = 1,");
         sb.AppendLine($"    @PageSize INT = 20");
@@ -264,7 +308,7 @@ public class SqlEngineService : ISqlEngineService
         sb.AppendLine("GO\n");
 
         // 3. Dynamic Upsert Procedure with Actual Columns
-        sb.AppendLine($"CREATE OR ALTER PROCEDURE dbo.usp_{tableName}_Save");
+        sb.AppendLine($"CREATE OR ALTER PROCEDURE dbo.{standards.SpPrefix}{tableName}_Save");
         sb.AppendLine($"    @{pkCol} INT = NULL OUTPUT,");
         foreach (var col in nonIdentityCols.Where(c => !c.IsPrimaryKey))
         {
@@ -324,7 +368,7 @@ public class SqlEngineService : ISqlEngineService
         sb.AppendLine("GO");
 
         response.ResultSql = sb.ToString();
-        response.Explanation = $"Created enterprise CRUD procedures dynamically mapped to [{tableName}]'s {meta.Columns.Count} columns with transaction handling.";
+        response.Explanation = $"Created enterprise CRUD procedures prefixed with {standards.SpPrefix} dynamically mapped to [{tableName}]'s {meta.Columns.Count} columns.";
         response.Recommendations.Add("Use stored procedures as the primary API layer to prevent direct SQL injection.");
         response.Recommendations.Add("Always check XACT_STATE() in CATCH blocks before issuing a ROLLBACK.");
     }
@@ -332,6 +376,7 @@ public class SqlEngineService : ISqlEngineService
     private async Task HandleCreateIndexesAsync(
         ScriptResponseModel response, ScriptRequestModel req, TableMetadata meta, string requirement, SqlValidationResult validation, CancellationToken ct)
     {
+        var standards = _standardsService.GetStandards();
         var tableName = meta.TableName;
         var pkCol = meta.PrimaryKeyColumn;
         response.Diagnosis = $"Analyzing indexing strategy for [{tableName}] to eliminate table scans and key lookups.";
@@ -347,9 +392,9 @@ public class SqlEngineService : ISqlEngineService
         var indexCol2 = nonPkCols.Count > 1 ? nonPkCols[1] : null;
 
         sb.AppendLine("-- OPTIMIZATION: Non-clustered search index dynamically derived from table schema");
-        sb.AppendLine($"IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_{tableName}_{indexCol1}' AND object_id = OBJECT_ID('dbo.[{tableName}]'))");
+        sb.AppendLine($"IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = '{standards.IndexPrefix}{tableName}_{indexCol1}' AND object_id = OBJECT_ID('dbo.[{tableName}]'))");
         sb.AppendLine($"BEGIN");
-        sb.AppendLine($"    CREATE NONCLUSTERED INDEX IX_{tableName}_{indexCol1}");
+        sb.AppendLine($"    CREATE NONCLUSTERED INDEX {standards.IndexPrefix}{tableName}_{indexCol1}");
         sb.AppendLine($"    ON dbo.[{tableName}] ([{indexCol1}])");
         if (!string.IsNullOrWhiteSpace(indexCol2))
         {
@@ -384,7 +429,6 @@ public class SqlEngineService : ISqlEngineService
         sb.AppendLine($"INSERT INTO dbo.[{tableName}] ({colList})");
         sb.AppendLine("VALUES");
 
-        // Generate 5 dynamic sample rows matching column types
         for (int row = 1; row <= 5; row++)
         {
             var valList = string.Join(", ", nonIdentityCols.Select(c => GenerateSampleValue(c, row)));
