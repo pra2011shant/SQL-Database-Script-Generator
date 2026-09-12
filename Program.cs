@@ -15,6 +15,7 @@ builder.Services.AddHttpClient<IOllamaClientService, OllamaClientService>();
 // Register Domain & Core Engine Services
 builder.Services.AddScoped<ISqlParserService, SqlParserService>();
 builder.Services.AddScoped<ISqlEngineService, SqlEngineService>();
+builder.Services.AddSingleton<ISqlTemplateService, SqlTemplateService>();
 
 var app = builder.Build();
 

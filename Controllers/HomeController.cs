@@ -9,16 +9,37 @@ public class HomeController : Controller
 {
     private readonly ILogger<HomeController> _logger;
     private readonly ISqlEngineService _sqlEngineService;
+    private readonly ISqlTemplateService _sqlTemplateService;
 
-    public HomeController(ILogger<HomeController> logger, ISqlEngineService sqlEngineService)
+    public HomeController(
+        ILogger<HomeController> logger, 
+        ISqlEngineService sqlEngineService,
+        ISqlTemplateService sqlTemplateService)
     {
         _logger = logger;
         _sqlEngineService = sqlEngineService;
+        _sqlTemplateService = sqlTemplateService;
     }
 
     public IActionResult Index()
     {
         return View();
+    }
+
+    /// <summary>
+    /// Fetches sample schema templates securely from the backend service.
+    /// </summary>
+    [HttpGet]
+    public IActionResult GetSampleTemplate(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            return BadRequest(new { Message = "Template key is required." });
+
+        var template = _sqlTemplateService.GetTemplateByKey(key);
+        if (template == null)
+            return NotFound(new { Message = "Template not found." });
+
+        return Json(new { key = key, sql = template });
     }
 
     /// <summary>

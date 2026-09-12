@@ -1,66 +1,17 @@
 /**
  * SQL Database Script Generator - Monaco Editor & UI Controller
+ * Pure client-side UI controller: All SQL parsing, templates, and generation are handled on backend.
  */
 
 let inputEditor = null;
 let outputEditor = null;
-
-const sampleTemplates = {
-    schema_customers: `-- Table Schema: Customers & Orders
-CREATE TABLE Customers (
-    CustomerID INT IDENTITY(1,1) PRIMARY KEY,
-    FirstName NVARCHAR(50) NOT NULL,
-    LastName NVARCHAR(50) NOT NULL,
-    Email NVARCHAR(100) UNIQUE NOT NULL,
-    PhoneNumber VARCHAR(20) NULL,
-    CreatedAt DATETIME2 DEFAULT GETUTCDATE()
-);
-
-CREATE TABLE Orders (
-    OrderID INT IDENTITY(1001,1) PRIMARY KEY,
-    CustomerID INT NOT NULL FOREIGN KEY REFERENCES Customers(CustomerID),
-    OrderDate DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
-    TotalAmount DECIMAL(18, 2) NOT NULL CHECK (TotalAmount >= 0),
-    Status VARCHAR(20) NOT NULL DEFAULT 'Pending'
-);`,
-
-    buggy_sql: `-- Buggy SQL Query with Syntax & Logical Errors
-SELEC CustomerID, FirstName LastName, SUM(TotalAmount
-FROM Customers
-INNER JOI Orders ON Customers.CustomerID = Orders.CustID
-WHER Status = 'Completed' AND OrderDate >= '2026-01-01'
-GROUP Customers.CustomerID
-HAVING SUM(TotalAmount) > 500
-ORDER BY CreatedDate DESC`,
-
-    optimize_query: `-- Unoptimized Query Needing Tuning & Indexes
-SELECT c.CustomerID, c.FirstName, c.LastName, o.OrderID, o.OrderDate, o.TotalAmount
-FROM Customers c
-LEFT JOIN Orders o ON c.CustomerID = o.CustomerID
-WHERE YEAR(o.OrderDate) = 2026
-  AND o.Status LIKE '%Completed%'
-  AND (SELECT COUNT(*) FROM Orders o2 WHERE o2.CustomerID = c.CustomerID) > 5
-ORDER BY o.TotalAmount DESC;`,
-
-    stored_proc_input: `-- Input Table: Products & Inventory
-CREATE TABLE Products (
-    ProductID INT IDENTITY(1,1) PRIMARY KEY,
-    SKU NVARCHAR(50) NOT NULL UNIQUE,
-    ProductName NVARCHAR(150) NOT NULL,
-    Category NVARCHAR(50) NOT NULL,
-    UnitPrice DECIMAL(18,2) NOT NULL,
-    StockQuantity INT NOT NULL DEFAULT 0,
-    IsActive BIT NOT NULL DEFAULT 1,
-    ModifiedDate DATETIME2 NOT NULL DEFAULT GETUTCDATE()
-);`
-};
 
 // Initialize Monaco Editors via RequireJS CDN
 function initMonaco() {
     require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' } });
 
     require(['vs/editor/editor.main'], function () {
-        // Register custom theme tweak if desired
+        // Register custom theme
         monaco.editor.defineTheme('sqlDarkModern', {
             base: 'vs-dark',
             inherit: true,
@@ -83,7 +34,7 @@ function initMonaco() {
 
         // Create Input Editor
         inputEditor = monaco.editor.create(document.getElementById('inputMonacoContainer'), {
-            value: sampleTemplates.schema_customers,
+            value: '',
             language: 'sql',
             theme: 'sqlDarkModern',
             automaticLayout: true,
@@ -100,7 +51,7 @@ function initMonaco() {
 
         // Create Output Editor
         outputEditor = monaco.editor.create(document.getElementById('outputMonacoContainer'), {
-            value: `-- Generated SQL scripts, stored procedures, indexes or diagnostics will appear here.\n-- Select an Action above and click "Generate Script" (or press Ctrl + Enter).`,
+            value: '',
             language: 'sql',
             theme: 'sqlDarkModern',
             automaticLayout: true,
@@ -138,32 +89,43 @@ function initMonaco() {
             document.getElementById('btnExecuteAction').click();
         });
 
-        // Initial metrics update
-        const initVal = inputEditor.getValue();
-        document.getElementById('inputLineCount').innerText = `${inputEditor.getModel().getLineCount()} lines (${initVal.length} chars)`;
+        // Initial default sample load from backend
+        loadSample('schema_customers');
     });
 }
 
-// Quick Sample Loader
-function loadSample(sampleKey) {
-    if (inputEditor && sampleTemplates[sampleKey]) {
-        inputEditor.setValue(sampleTemplates[sampleKey]);
-        
-        // Auto-switch action based on sample
-        const actionSelect = document.getElementById('actionSelect');
-        if (sampleKey === 'buggy_sql') {
-            actionSelect.value = 'debug_sql';
-            document.getElementById('customRequirement').value = 'Fix all syntax and grammatical errors, format properly with semicolons.';
-        } else if (sampleKey === 'optimize_query') {
-            actionSelect.value = 'optimize_query';
-            document.getElementById('customRequirement').value = 'Optimize joins, avoid non-SARGable WHERE predicates, and suggest indexes.';
-        } else if (sampleKey === 'stored_proc_input') {
-            actionSelect.value = 'create_sp';
-            document.getElementById('customRequirement').value = 'Generate CRUD stored procedures with TRY...CATCH error handling and transactions.';
-        } else {
-            actionSelect.value = 'create_sp';
-            document.getElementById('customRequirement').value = 'Generate comprehensive CRUD stored procedures.';
+// Fetch Sample Schema dynamically from backend API
+async function loadSample(sampleKey) {
+    if (!sampleKey) return;
+
+    try {
+        const response = await fetch(`/Home/GetSampleTemplate?key=${encodeURIComponent(sampleKey)}`);
+        if (response.ok) {
+            const data = await response.json();
+            if (inputEditor && data.sql) {
+                inputEditor.setValue(data.sql);
+            }
+
+            // Automatically set recommended default requirements
+            const actionSelect = document.getElementById('actionSelect');
+            const reqInput = document.getElementById('customRequirement');
+
+            if (sampleKey === 'buggy_sql') {
+                actionSelect.value = 'debug_sql';
+                reqInput.value = 'Fix all syntax and grammatical errors, format properly with semicolons.';
+            } else if (sampleKey === 'optimize_query') {
+                actionSelect.value = 'optimize_query';
+                reqInput.value = 'Optimize joins, avoid non-SARGable WHERE predicates, and suggest indexes.';
+            } else if (sampleKey === 'stored_proc_input') {
+                actionSelect.value = 'create_sp';
+                reqInput.value = 'Generate CRUD stored procedures with TRY...CATCH error handling and transactions.';
+            } else {
+                actionSelect.value = 'create_sp';
+                reqInput.value = 'Generate full CRUD stored procedures with TRY...CATCH and transaction handling.';
+            }
         }
+    } catch (err) {
+        console.error('Failed to load template from server:', err);
     }
 }
 
@@ -247,10 +209,30 @@ function switchLayout(mode) {
     if (outputEditor) outputEditor.layout();
 }
 
-// Execute Action button handler
+// Jump to line in input editor from diagnostics drawer
+function jumpToLine(line, col) {
+    if (inputEditor && line > 0) {
+        inputEditor.revealPositionInCenter({ lineNumber: line, column: col || 1 });
+        inputEditor.setPosition({ lineNumber: line, column: col || 1 });
+        inputEditor.focus();
+    }
+}
+
+// Main event initializations
 document.addEventListener('DOMContentLoaded', () => {
     initMonaco();
 
+    // Monaco layout trigger on output tab change
+    const codeTabBtn = document.getElementById('tab-code-btn');
+    if (codeTabBtn) {
+        codeTabBtn.addEventListener('shown.bs.tab', () => {
+            if (outputEditor) {
+                setTimeout(() => outputEditor.layout(), 50);
+            }
+        });
+    }
+
+    // Execute Action button handler
     const btnExec = document.getElementById('btnExecuteAction');
     if (btnExec) {
         btnExec.addEventListener('click', async () => {
@@ -350,25 +332,3 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
-
-// Jump to line in input editor from diagnostics drawer
-function jumpToLine(line, col) {
-    if (inputEditor && line > 0) {
-        inputEditor.revealPositionInCenter({ lineNumber: line, column: col || 1 });
-        inputEditor.setPosition({ lineNumber: line, column: col || 1 });
-        inputEditor.focus();
-    }
-}
-
-// Ensure Monaco layouts properly when output tab is clicked
-document.addEventListener('DOMContentLoaded', () => {
-    const codeTabBtn = document.getElementById('tab-code-btn');
-    if (codeTabBtn) {
-        codeTabBtn.addEventListener('shown.bs.tab', () => {
-            if (outputEditor) {
-                setTimeout(() => outputEditor.layout(), 50);
-            }
-        });
-    }
-});
-
