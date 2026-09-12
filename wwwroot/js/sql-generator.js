@@ -374,11 +374,31 @@ async function saveCorporateStandards() {
         });
 
         if (response.ok) {
-            alert('Corporate Standards & RAG Policy updated successfully!');
+            if (window.Swal) {
+                Swal.fire({
+                    icon: 'success',
+                    title: 'Standards Saved',
+                    text: 'Corporate SQL Standards & RAG Policy updated successfully!',
+                    background: '#1e293b',
+                    color: '#f8fafc',
+                    confirmButtonColor: '#3b82f6',
+                    timer: 2000,
+                    showConfirmButton: false
+                });
+            }
             bootstrap.Modal.getInstance(document.getElementById('standardsModal')).hide();
         }
     } catch (err) {
-        alert(`Failed to save: ${err.message}`);
+        if (window.Swal) {
+            Swal.fire({
+                icon: 'error',
+                title: 'Save Failed',
+                text: err.message,
+                background: '#1e293b',
+                color: '#f8fafc',
+                confirmButtonColor: '#ef4444'
+            });
+        }
     }
 }
 
@@ -417,7 +437,20 @@ document.addEventListener('DOMContentLoaded', () => {
             const requirement = document.getElementById('customRequirement').value;
 
             if (!inputSql.trim()) {
-                alert('Please provide a SQL query or table schema in the Input Panel.');
+                if (window.Swal) {
+                    Swal.fire({
+                        icon: 'info',
+                        title: 'SQL Input Required',
+                        html: 'Please type/paste a SQL query or table schema in the <b>Input Panel</b>,<br>or pick a ready-made template from the <b>Templates</b> dropdown.',
+                        background: '#1e293b',
+                        color: '#f8fafc',
+                        confirmButtonColor: '#3b82f6',
+                        confirmButtonText: '<i class="bi bi-check2"></i> Got it',
+                        customClass: {
+                            popup: 'border border-secondary'
+                        }
+                    });
+                }
                 return;
             }
 
