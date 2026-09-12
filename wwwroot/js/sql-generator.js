@@ -429,16 +429,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnExec = document.getElementById('btnExecuteAction');
     if (btnExec) {
         btnExec.addEventListener('click', async () => {
-            const inputSql = inputEditor ? inputEditor.getValue() : '';
+            let inputSql = inputEditor ? inputEditor.getValue().trim() : '';
             const action = document.getElementById('actionSelect').value;
-            const requirement = document.getElementById('customRequirement').value;
+            const requirement = document.getElementById('customRequirement') ? document.getElementById('customRequirement').value.trim() : '';
 
-            if (!inputSql.trim()) {
+            if (!inputSql && !requirement) {
                 if (window.Swal) {
                     Swal.fire({
                         icon: 'info',
-                        title: 'SQL Input Required',
-                        html: 'Please type/paste a SQL query or table schema in the <b>Input Panel</b>,<br>or pick a ready-made template from the <b>Templates</b> dropdown.',
+                        title: 'Input Required',
+                        html: 'Please enter instructions in the <b>Requirements</b> box or paste SQL in the <b>Input Panel</b>.',
                         background: '#1e293b',
                         color: '#f8fafc',
                         confirmButtonColor: '#3b82f6',
@@ -449,6 +449,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                 }
                 return;
+            }
+
+            if (!inputSql && requirement) {
+                inputSql = requirement;
             }
 
             if (activeAbortController) {
