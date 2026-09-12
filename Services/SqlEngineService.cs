@@ -148,13 +148,13 @@ public class SqlEngineService : ISqlEngineService
             $"{_standardsService.BuildStandardsContextPrompt()}\n" +
             "Prefix key design choices with '-- BEST PRACTICE:' comment markers. Return ONLY executable T-SQL.";
 
-        string userPrompt = $"Generate a complete CREATE TABLE schema for entity or table [{tableName}]:\n\n{req.SqlInput}\n\nRequirements: {requirement}";
+        string userPrompt = $"Generate a complete, production-grade T-SQL CREATE TABLE schema adhering to the following requirements and specifications:\n\nUser Prompt / Requirements: {req.SqlInput}\nAdditional Directives: {requirement}";
 
         var aiResult = await _ollamaService.GenerateSqlCompletionAsync(userPrompt, systemPrompt, ct);
         if (!string.IsNullOrWhiteSpace(aiResult))
         {
             response.ResultSql = CleanAiOutput(aiResult);
-            response.Explanation = $"Generated production-grade CREATE TABLE DDL for [{tableName}] with constraints and audit tracking.";
+            response.Explanation = $"Generated production-grade CREATE TABLE DDL using AI based on your domain requirements with constraints and audit tracking.";
             response.Recommendations.Add("Always define explicit constraint names (e.g. PK_..., FK_..., DF_..., CK_...) instead of system-generated names.");
             response.Recommendations.Add("Use DATETIME2(7) instead of legacy DATETIME for higher precision and standard storage.");
             return;
