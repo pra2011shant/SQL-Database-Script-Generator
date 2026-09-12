@@ -54,6 +54,10 @@ public class SqlEngineService : ISqlEngineService
 
         switch (actionKey)
         {
+            case "create_table":
+                await HandleCreateTableAsync(response, request, tableName, requirement, validation, cancellationToken);
+                break;
+
             case "debug_sql":
                 await HandleDebugSqlAsync(response, request, requirement, validation, cancellationToken);
                 break;
@@ -399,6 +403,91 @@ public class SqlEngineService : ISqlEngineService
         response.ResultSql = sb.ToString();
         response.Explanation = "Generated randomized mock data rows matching schema datatypes wrapped in single atomic transaction.";
         response.Recommendations.Add("For large test sets (>10,000 rows), consider SqlBulkCopy or BCP utility.");
+    }
+
+    private async Task HandleCreateTableAsync(
+        ScriptResponseModel response, ScriptRequestModel req, string tableName, string requirement, SqlValidationResult validation, CancellationToken ct)
+    {
+        response.Diagnosis = $"Designing enterprise DDL table schema for [{tableName}] with PK, FK, constraints, and audit columns.";
+
+        string systemPrompt = "You are a Principal Microsoft SQL Server Database Architect. " +
+            "Generate production-grade T-SQL CREATE TABLE scripts with explicit PRIMARY KEY, FOREIGN KEY constraints, CHECK constraints, DEFAULT constraints, and standard Audit columns (CreatedAtUtc, CreatedBy, ModifiedAtUtc, ModifiedBy, IsDeleted). " +
+            "Prefix key design choices with '-- BEST PRACTICE:' comment markers. Return ONLY executable T-SQL.";
+
+        string userPrompt = $"Generate a complete CREATE TABLE schema for entity or table [{tableName}]:\n\n{req.SqlInput}\n\nRequirements: {requirement}";
+
+        var aiResult = await _ollamaService.GenerateSqlCompletionAsync(userPrompt, systemPrompt, ct);
+        if (!string.IsNullOrWhiteSpace(aiResult))
+        {
+            response.ResultSql = CleanAiOutput(aiResult);
+            response.Explanation = $"Generated production-grade CREATE TABLE DDL for [{tableName}] with constraints and audit tracking.";
+            response.Recommendations.Add("Always define explicit constraint names (e.g. PK_..., FK_..., DF_..., CK_...) instead of system-generated names.");
+            response.Recommendations.Add("Use DATETIME2(7) instead of legacy DATETIME for higher precision and standard storage.");
+            return;
+        }
+
+        // Fast Local Deterministic Table Generator
+        var sb = new StringBuilder(1536);
+        sb.AppendLine($"-- ===========================================================================");
+        sb.AppendLine($"-- Enterprise Table Schema Definition: dbo.[{tableName}]");
+        sb.AppendLine($"-- Requirement: {requirement}");
+        sb.AppendLine($"-- Target Engine: {req.DatabaseEngine}");
+        sb.AppendLine($"-- Generated On: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC");
+        sb.AppendLine($"-- ===========================================================================");
+        sb.AppendLine();
+        sb.AppendLine($"-- BEST PRACTICE: Safe idempotent deployment check");
+        sb.AppendLine($"IF OBJECT_ID('dbo.[{tableName}]', 'U') IS NULL");
+        sb.AppendLine($"BEGIN");
+        sb.AppendLine($"    CREATE TABLE dbo.[{tableName}] (");
+        sb.AppendLine($"        -- BEST PRACTICE: Explicitly named surrogate Primary Key");
+        sb.AppendLine($"        [{tableName}ID] INT IDENTITY(1,1) NOT NULL,");
+        sb.AppendLine();
+        sb.AppendLine($"        -- Business Data Attributes");
+        sb.AppendLine($"        [Code] NVARCHAR(50) NOT NULL,");
+        sb.AppendLine($"        [Name] NVARCHAR(150) NOT NULL,");
+        sb.AppendLine($"        [Description] NVARCHAR(500) NULL,");
+        sb.AppendLine($"        [Category] NVARCHAR(50) NOT NULL,");
+        sb.AppendLine($"        [Amount] DECIMAL(18,2) NOT NULL,");
+        sb.AppendLine($"        [Status] VARCHAR(30) NOT NULL,");
+        sb.AppendLine();
+        sb.AppendLine($"        -- BEST PRACTICE: Standardized Enterprise Audit & Soft-Delete Columns");
+        sb.AppendLine($"        [IsActive] BIT NOT NULL CONSTRAINT DF_{tableName}_IsActive DEFAULT (1),");
+        sb.AppendLine($"        [IsDeleted] BIT NOT NULL CONSTRAINT DF_{tableName}_IsDeleted DEFAULT (0),");
+        sb.AppendLine($"        [CreatedAtUtc] DATETIME2(7) NOT NULL CONSTRAINT DF_{tableName}_CreatedAtUtc DEFAULT (SYSUTCDATETIME()),");
+        sb.AppendLine($"        [CreatedBy] NVARCHAR(100) NOT NULL CONSTRAINT DF_{tableName}_CreatedBy DEFAULT (SYSTEM_USER),");
+        sb.AppendLine($"        [ModifiedAtUtc] DATETIME2(7) NULL,");
+        sb.AppendLine($"        [ModifiedBy] NVARCHAR(100) NULL,");
+        sb.AppendLine($"        [RowVersion] ROWVERSION NOT NULL, -- Optimistic Concurrency Control");
+        sb.AppendLine();
+        sb.AppendLine($"        -- BEST PRACTICE: Explicit Primary Key constraint definition");
+        sb.AppendLine($"        CONSTRAINT PK_{tableName}_{tableName}ID PRIMARY KEY CLUSTERED ([{tableName}ID] ASC),");
+        sb.AppendLine();
+        sb.AppendLine($"        -- BEST PRACTICE: Explicit Unique & Check Constraints");
+        sb.AppendLine($"        CONSTRAINT UQ_{tableName}_Code UNIQUE NONCLUSTERED ([Code] ASC),");
+        sb.AppendLine($"        CONSTRAINT CK_{tableName}_Amount CHECK ([Amount] >= 0)");
+        sb.AppendLine($"    ){(req.UsePageCompression ? " WITH (DATA_COMPRESSION = PAGE)" : "")};");
+        sb.AppendLine($"    PRINT 'Table dbo.[{tableName}] created successfully.';");
+        sb.AppendLine($"END");
+        sb.AppendLine($"ELSE");
+        sb.AppendLine($"BEGIN");
+        sb.AppendLine($"    PRINT 'Table dbo.[{tableName}] already exists. Skipping creation.';");
+        sb.AppendLine($"END;");
+        sb.AppendLine($"GO\n");
+
+        sb.AppendLine($"-- BEST PRACTICE: Non-clustered index on commonly queried status and date fields");
+        sb.AppendLine($"IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_{tableName}_Status_CreatedAtUtc' AND object_id = OBJECT_ID('dbo.[{tableName}]'))");
+        sb.AppendLine($"BEGIN");
+        sb.AppendLine($"    CREATE NONCLUSTERED INDEX IX_{tableName}_Status_CreatedAtUtc");
+        sb.AppendLine($"    ON dbo.[{tableName}] ([Status], [CreatedAtUtc] DESC)");
+        sb.AppendLine($"    INCLUDE ([Name], [Amount])");
+        sb.AppendLine($"    WHERE [IsDeleted] = 0; -- Filtered Index for active records");
+        sb.AppendLine($"END;");
+        sb.AppendLine($"GO");
+
+        response.ResultSql = sb.ToString();
+        response.Explanation = $"Created enterprise table schema for [{tableName}] with named Primary Key, Unique constraint, Check constraint, Audit columns, RowVersion for concurrency, and a Filtered Index.";
+        response.Recommendations.Add("Always name constraints explicitly (PK_, UQ_, CK_, DF_) to simplify database migrations.");
+        response.Recommendations.Add("Use Filtered Indexes (WHERE IsDeleted = 0) to speed up queries when using soft deletes.");
     }
 
     #endregion
