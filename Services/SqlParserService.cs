@@ -198,25 +198,45 @@ public class SqlParserService : ISqlParserService
 
     private static string ExtractTableNameFromNaturalPrompt(string text)
     {
-        // Pattern 1: "create [a/an] <Name> table"
-        var m1 = Regex.Match(text, @"(?:create|make|generate|build|crete)\s+(?:a\s+|an\s+)?([a-zA-Z0-9_]+)\s+table", RegexOptions.IgnoreCase);
-        if (m1.Success && IsValidIdentifier(m1.Groups[1].Value))
-            return FormatIdentifierName(m1.Groups[1].Value);
+        // Pattern 1: "table name [rhega/hoga/is/as] <Name>" or "table named <Name>" or "table <Name>"
+        var matches1 = Regex.Matches(text, @"table\s+(?:name\s+(?:rhega|hoga|rakhna|is|as|be)?|named|of|for)?\s*([a-zA-Z0-9_]+)", RegexOptions.IgnoreCase);
+        foreach (Match m in matches1)
+        {
+            var val = m.Groups[1].Value;
+            if (IsValidIdentifier(val)) return FormatIdentifierName(val);
+        }
 
-        // Pattern 2: "<Name> [ka/ki/ke/ko] [ek] table" (Hindi / Hinglish)
-        var m2 = Regex.Match(text, @"([a-zA-Z0-9_]+)\s+(?:ka|ki|ke|ko)\s+(?:ek\s+)?(?:table|schema)", RegexOptions.IgnoreCase);
-        if (m2.Success && IsValidIdentifier(m2.Groups[1].Value))
-            return FormatIdentifierName(m2.Groups[1].Value);
+        // Pattern 2: "<Name> table name [rhega/hoga]" (e.g. "mstschool table name rhegaa")
+        var matches2 = Regex.Matches(text, @"([a-zA-Z0-9_]+)\s+table\s+name", RegexOptions.IgnoreCase);
+        foreach (Match m in matches2)
+        {
+            var val = m.Groups[1].Value;
+            if (IsValidIdentifier(val)) return FormatIdentifierName(val);
+        }
 
-        // Pattern 3: "table [for/of/named] <Name>"
-        var m3 = Regex.Match(text, @"table\s+(?:for|of|named)\s+([a-zA-Z0-9_]+)", RegexOptions.IgnoreCase);
-        if (m3.Success && IsValidIdentifier(m3.Groups[1].Value))
-            return FormatIdentifierName(m3.Groups[1].Value);
+        // Pattern 3: "create [a/an] <Name> table"
+        var matches3 = Regex.Matches(text, @"(?:create|make|generate|build|crete)\s+(?:a\s+|an\s+)?([a-zA-Z0-9_]+)\s+table", RegexOptions.IgnoreCase);
+        foreach (Match m in matches3)
+        {
+            var val = m.Groups[1].Value;
+            if (IsValidIdentifier(val)) return FormatIdentifierName(val);
+        }
 
-        // Pattern 4: "<Name> table"
-        var m4 = Regex.Match(text, @"([a-zA-Z0-9_]+)\s+table", RegexOptions.IgnoreCase);
-        if (m4.Success && IsValidIdentifier(m4.Groups[1].Value))
-            return FormatIdentifierName(m4.Groups[1].Value);
+        // Pattern 4: "<Name> [ka/ki/ke/ko] [ek] table" (Hindi / Hinglish)
+        var matches4 = Regex.Matches(text, @"([a-zA-Z0-9_]+)\s+(?:ka|ki|ke|ko)\s+(?:ek\s+)?(?:table|schema)", RegexOptions.IgnoreCase);
+        foreach (Match m in matches4)
+        {
+            var val = m.Groups[1].Value;
+            if (IsValidIdentifier(val)) return FormatIdentifierName(val);
+        }
+
+        // Pattern 5: "<Name> table"
+        var matches5 = Regex.Matches(text, @"([a-zA-Z0-9_]+)\s+table", RegexOptions.IgnoreCase);
+        foreach (Match m in matches5)
+        {
+            var val = m.Groups[1].Value;
+            if (IsValidIdentifier(val)) return FormatIdentifierName(val);
+        }
 
         return "TargetTable";
     }
@@ -258,10 +278,21 @@ public class SqlParserService : ISqlParserService
         }
 
         // 2. Generic keyword attribute matching across languages
+        if (lower.Contains("school") || lower.Contains("college") || lower.Contains("institute"))
+        {
+            TryAdd("SchoolName", "NVARCHAR(150)", false);
+            TryAdd("SchoolCode", "VARCHAR(50)", false);
+            TryAdd("PrincipalName", "NVARCHAR(100)", true);
+            TryAdd("AffiliationNumber", "VARCHAR(50)", true);
+        }
+
         if (lower.Contains("name") || lower.Contains("naam"))
         {
-            TryAdd("FirstName", "NVARCHAR(50)", false);
-            TryAdd("LastName", "NVARCHAR(50)", false);
+            if (!addedCols.Contains("SchoolName"))
+            {
+                TryAdd("FirstName", "NVARCHAR(50)", false);
+                TryAdd("LastName", "NVARCHAR(50)", false);
+            }
         }
 
         if (lower.Contains("roll") || lower.Contains("rollno") || lower.Contains("roll_no"))
@@ -282,6 +313,7 @@ public class SqlParserService : ISqlParserService
         if (lower.Contains("address") || lower.Contains("pata") || lower.Contains("location"))
         {
             TryAdd("AddressLine1", "NVARCHAR(200)", false);
+            TryAdd("AddressLine2", "NVARCHAR(200)", true);
             TryAdd("City", "NVARCHAR(100)", false);
             TryAdd("State", "NVARCHAR(100)", false);
             TryAdd("PostalCode", "VARCHAR(20)", true);
@@ -346,9 +378,9 @@ public class SqlParserService : ISqlParserService
     {
         var ignoreWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "a", "an", "the", "ek", "please", "hii", "hello", "new", "simple", "basic", "custom", "bnao", "bnaoo", "krna", "or", "and", "me", "esme", "ye", "column", "columns"
+            "a", "an", "the", "ek", "please", "hii", "hello", "new", "simple", "basic", "custom", "bnao", "bnaoo", "krna", "or", "and", "me", "esme", "ye", "column", "columns", "cahiye", "jo", "usme", "ka", "ki", "ke", "ko", "name", "naam", "rhega", "rhegaa", "hoga", "rakhna", "table", "schema", "mujhe"
         };
-        return !string.IsNullOrWhiteSpace(word) && !ignoreWords.Contains(word);
+        return !string.IsNullOrWhiteSpace(word) && !ignoreWords.Contains(word) && word.Length > 1;
     }
 
     private static string FormatIdentifierName(string raw)
@@ -356,7 +388,7 @@ public class SqlParserService : ISqlParserService
         if (string.IsNullOrWhiteSpace(raw)) return "TargetTable";
         var clean = Regex.Replace(raw, @"[^a-zA-Z0-9_]", "");
         if (string.IsNullOrEmpty(clean)) return "TargetTable";
-        return char.ToUpperInvariant(clean[0]) + clean.Substring(1);
+        return clean;
     }
 
     private static string GenerateScriptFromFragment(TSqlFragment fragment)
