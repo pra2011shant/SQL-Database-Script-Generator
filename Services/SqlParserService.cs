@@ -7,7 +7,7 @@ namespace SQLDatabaseScriptGenerator.Services;
 
 /// <summary>
 /// High-performance implementation of ISqlParserService utilizing Microsoft ScriptDom.
-/// Thread-safe and optimized to minimize memory allocations.
+/// Thread-safe, generic, and optimized to minimize memory allocations without domain hardcoding.
 /// </summary>
 public class SqlParserService : ISqlParserService
 {
@@ -124,17 +124,21 @@ public class SqlParserService : ISqlParserService
         }
         else
         {
-            // Detect natural language keywords if no CREATE TABLE statement was found
-            DetectEntityFromPrompt(sqlScript, meta);
+            meta.TableName = "TargetTable";
+            meta.PrimaryKeyColumn = "TargetTableID";
         }
 
-        // Parse column definitions if valid SQL structure
+        // Parse column definitions dynamically from SQL text
         using var reader = new StringReader(sqlScript);
         string? line;
         while ((line = reader.ReadLine()) != null)
         {
             var trimmed = line.Trim().TrimEnd(',');
-            if (trimmed.StartsWith("--") || trimmed.StartsWith("/*") || trimmed.StartsWith("CREATE TABLE", StringComparison.OrdinalIgnoreCase) || trimmed.StartsWith("CONSTRAINT", StringComparison.OrdinalIgnoreCase) || trimmed.StartsWith(")", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(trimmed))
+            if (trimmed.StartsWith("--") || trimmed.StartsWith("/*") || 
+                trimmed.StartsWith("CREATE TABLE", StringComparison.OrdinalIgnoreCase) || 
+                trimmed.StartsWith("CONSTRAINT", StringComparison.OrdinalIgnoreCase) || 
+                trimmed.StartsWith(")", StringComparison.OrdinalIgnoreCase) || 
+                string.IsNullOrWhiteSpace(trimmed))
             {
                 continue;
             }
@@ -145,13 +149,13 @@ public class SqlParserService : ISqlParserService
                 var colName = colMatch.Groups[1].Value;
                 var dataType = colMatch.Groups[2].Value.ToUpperInvariant();
 
-                // Ensure data type is a recognized SQL type and not natural language words
+                // Validate that extracted dataType is a legitimate SQL data type
                 if (!ValidSqlDataTypeRegex.IsMatch(dataType))
                 {
                     continue;
                 }
 
-                // Skip constraint keywords if captured
+                // Filter out SQL constraint identifiers
                 if (colName.Equals("PRIMARY", StringComparison.OrdinalIgnoreCase) ||
                     colName.Equals("CONSTRAINT", StringComparison.OrdinalIgnoreCase) ||
                     colName.Equals("FOREIGN", StringComparison.OrdinalIgnoreCase) ||
@@ -162,7 +166,8 @@ public class SqlParserService : ISqlParserService
                 }
 
                 var isIdentity = trimmed.Contains("IDENTITY", StringComparison.OrdinalIgnoreCase);
-                var isPk = trimmed.Contains("PRIMARY KEY", StringComparison.OrdinalIgnoreCase) || colName.Equals(meta.PrimaryKeyColumn, StringComparison.OrdinalIgnoreCase);
+                var isPk = trimmed.Contains("PRIMARY KEY", StringComparison.OrdinalIgnoreCase) || 
+                           colName.Equals(meta.PrimaryKeyColumn, StringComparison.OrdinalIgnoreCase);
 
                 if (isPk)
                 {
@@ -180,133 +185,17 @@ public class SqlParserService : ISqlParserService
             }
         }
 
-        // Fallback rich domain attributes if no valid SQL columns were extracted
+        // Generic fallback columns if no SQL columns were found in the input
         if (meta.Columns.Count == 0)
         {
-            PopulateDomainColumns(meta, sqlScript);
-        }
-
-        return meta;
-    }
-
-    private static void DetectEntityFromPrompt(string text, TableMetadata meta)
-    {
-        var lower = text.ToLowerInvariant();
-        if (lower.Contains("teacher") || lower.Contains("faculty") || lower.Contains("professor") || lower.Contains("instructor"))
-        {
-            meta.TableName = "Teachers";
-            meta.PrimaryKeyColumn = "TeacherID";
-        }
-        else if (lower.Contains("student") || lower.Contains("pupil"))
-        {
-            meta.TableName = "Students";
-            meta.PrimaryKeyColumn = "StudentID";
-        }
-        else if (lower.Contains("employee") || lower.Contains("staff") || lower.Contains("worker"))
-        {
-            meta.TableName = "Employees";
-            meta.PrimaryKeyColumn = "EmployeeID";
-        }
-        else if (lower.Contains("product") || lower.Contains("item") || lower.Contains("goods"))
-        {
-            meta.TableName = "Products";
-            meta.PrimaryKeyColumn = "ProductID";
-        }
-        else if (lower.Contains("customer") || lower.Contains("client") || lower.Contains("buyer"))
-        {
-            meta.TableName = "Customers";
-            meta.PrimaryKeyColumn = "CustomerID";
-        }
-        else if (lower.Contains("order") || lower.Contains("invoice"))
-        {
-            meta.TableName = "Orders";
-            meta.PrimaryKeyColumn = "OrderID";
-        }
-        else
-        {
-            meta.TableName = "TargetTable";
-            meta.PrimaryKeyColumn = "TargetTableID";
-        }
-    }
-
-    private static void PopulateDomainColumns(TableMetadata meta, string text)
-    {
-        var lower = text.ToLowerInvariant();
-
-        meta.Columns.Add(new ColumnMetadata { Name = meta.PrimaryKeyColumn, DataType = "INT", IsPrimaryKey = true, IsIdentity = true, IsNullable = false });
-
-        if (meta.TableName.Equals("Teachers", StringComparison.OrdinalIgnoreCase))
-        {
-            meta.Columns.Add(new ColumnMetadata { Name = "FirstName", DataType = "NVARCHAR(50)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "LastName", DataType = "NVARCHAR(50)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "Email", DataType = "NVARCHAR(100)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "PhoneNumber", DataType = "NVARCHAR(20)", IsNullable = true });
-            meta.Columns.Add(new ColumnMetadata { Name = "SubjectSpecialization", DataType = "NVARCHAR(100)", IsNullable = true });
-            meta.Columns.Add(new ColumnMetadata { Name = "AddressLine1", DataType = "NVARCHAR(200)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "AddressLine2", DataType = "NVARCHAR(200)", IsNullable = true });
-            meta.Columns.Add(new ColumnMetadata { Name = "City", DataType = "NVARCHAR(100)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "State", DataType = "NVARCHAR(100)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "PostalCode", DataType = "NVARCHAR(20)", IsNullable = true });
-            meta.Columns.Add(new ColumnMetadata { Name = "Country", DataType = "NVARCHAR(100)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "HireDate", DataType = "DATE", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "Salary", DataType = "DECIMAL(18,2)", IsNullable = false });
-        }
-        else if (meta.TableName.Equals("Students", StringComparison.OrdinalIgnoreCase))
-        {
-            meta.Columns.Add(new ColumnMetadata { Name = "FirstName", DataType = "NVARCHAR(50)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "LastName", DataType = "NVARCHAR(50)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "DateOfBirth", DataType = "DATE", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "Email", DataType = "NVARCHAR(100)", IsNullable = true });
-            meta.Columns.Add(new ColumnMetadata { Name = "PhoneNumber", DataType = "NVARCHAR(20)", IsNullable = true });
-            meta.Columns.Add(new ColumnMetadata { Name = "AddressLine1", DataType = "NVARCHAR(200)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "City", DataType = "NVARCHAR(100)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "State", DataType = "NVARCHAR(100)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "PostalCode", DataType = "NVARCHAR(20)", IsNullable = true });
-            meta.Columns.Add(new ColumnMetadata { Name = "EnrollmentDate", DataType = "DATE", IsNullable = false });
-        }
-        else if (meta.TableName.Equals("Employees", StringComparison.OrdinalIgnoreCase))
-        {
-            meta.Columns.Add(new ColumnMetadata { Name = "FirstName", DataType = "NVARCHAR(50)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "LastName", DataType = "NVARCHAR(50)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "Email", DataType = "NVARCHAR(100)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "Department", DataType = "NVARCHAR(50)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "JobTitle", DataType = "NVARCHAR(100)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "AddressLine1", DataType = "NVARCHAR(200)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "City", DataType = "NVARCHAR(100)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "State", DataType = "NVARCHAR(100)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "PostalCode", DataType = "NVARCHAR(20)", IsNullable = true });
-            meta.Columns.Add(new ColumnMetadata { Name = "HireDate", DataType = "DATE", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "Salary", DataType = "DECIMAL(18,2)", IsNullable = false });
-        }
-        else if (meta.TableName.Equals("Customers", StringComparison.OrdinalIgnoreCase))
-        {
-            meta.Columns.Add(new ColumnMetadata { Name = "FirstName", DataType = "NVARCHAR(50)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "LastName", DataType = "NVARCHAR(50)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "Email", DataType = "NVARCHAR(100)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "PhoneNumber", DataType = "NVARCHAR(20)", IsNullable = true });
-            meta.Columns.Add(new ColumnMetadata { Name = "AddressLine1", DataType = "NVARCHAR(200)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "City", DataType = "NVARCHAR(100)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "State", DataType = "NVARCHAR(100)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "PostalCode", DataType = "NVARCHAR(20)", IsNullable = true });
-            meta.Columns.Add(new ColumnMetadata { Name = "Country", DataType = "NVARCHAR(100)", IsNullable = false });
-        }
-        else if (lower.Contains("address"))
-        {
-            meta.Columns.Add(new ColumnMetadata { Name = "AddressLine1", DataType = "NVARCHAR(200)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "AddressLine2", DataType = "NVARCHAR(200)", IsNullable = true });
-            meta.Columns.Add(new ColumnMetadata { Name = "City", DataType = "NVARCHAR(100)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "StateProvince", DataType = "NVARCHAR(100)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "PostalCode", DataType = "NVARCHAR(20)", IsNullable = true });
-            meta.Columns.Add(new ColumnMetadata { Name = "Country", DataType = "NVARCHAR(100)", IsNullable = false });
-        }
-        else
-        {
+            meta.Columns.Add(new ColumnMetadata { Name = meta.PrimaryKeyColumn, DataType = "INT", IsPrimaryKey = true, IsIdentity = true, IsNullable = false });
             meta.Columns.Add(new ColumnMetadata { Name = "Code", DataType = "NVARCHAR(50)", IsNullable = false });
             meta.Columns.Add(new ColumnMetadata { Name = "Name", DataType = "NVARCHAR(150)", IsNullable = false });
             meta.Columns.Add(new ColumnMetadata { Name = "Description", DataType = "NVARCHAR(500)", IsNullable = true });
-            meta.Columns.Add(new ColumnMetadata { Name = "Amount", DataType = "DECIMAL(18,2)", IsNullable = false });
             meta.Columns.Add(new ColumnMetadata { Name = "Status", DataType = "VARCHAR(30)", IsNullable = false });
         }
+
+        return meta;
     }
 
     private static string GenerateScriptFromFragment(TSqlFragment fragment)
