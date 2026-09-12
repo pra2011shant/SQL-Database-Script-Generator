@@ -10,4 +10,5 @@ public interface ISqlParserService
     SqlValidationResult ValidateAndParse(string sqlScript);
     string FormatSql(string sqlScript);
     string? ExtractPrimaryTableName(string sqlScript);
+    TableMetadata ExtractTableMetadata(string sqlScript);
 }

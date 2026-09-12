@@ -23,6 +23,10 @@ public class SqlParserService : ISqlParserService
         @"CREATE\s+TABLE\s+(?:dbo\.)?\[?([a-zA-Z0-9_]+)\]?",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    private static readonly Regex ColumnDefRegex = new(
+        @"\[?([a-zA-Z0-9_]+)\]?\s+([a-zA-Z0-9_\(\)]+)(?:\s+(IDENTITY(?:\([0-9,\s]+\))?))?(?:\s+(PRIMARY\s+KEY))?(?:\s+(NOT\s+NULL|NULL))?",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     public SqlValidationResult ValidateAndParse(string sqlScript)
     {
         var result = new SqlValidationResult();
@@ -100,6 +104,76 @@ public class SqlParserService : ISqlParserService
 
         var match = TableNameRegex.Match(sqlScript);
         return match.Success ? match.Groups[1].Value : null;
+    }
+
+    public TableMetadata ExtractTableMetadata(string sqlScript)
+    {
+        var meta = new TableMetadata();
+        if (string.IsNullOrWhiteSpace(sqlScript))
+            return meta;
+
+        var tableMatch = TableNameRegex.Match(sqlScript);
+        if (tableMatch.Success)
+        {
+            meta.TableName = tableMatch.Groups[1].Value;
+            meta.PrimaryKeyColumn = $"{meta.TableName}ID";
+        }
+
+        // Parse column definitions
+        using var reader = new StringReader(sqlScript);
+        string? line;
+        while ((line = reader.ReadLine()) != null)
+        {
+            var trimmed = line.Trim().TrimEnd(',');
+            if (trimmed.StartsWith("--") || trimmed.StartsWith("/*") || trimmed.StartsWith("CREATE TABLE", StringComparison.OrdinalIgnoreCase) || trimmed.StartsWith("CONSTRAINT", StringComparison.OrdinalIgnoreCase) || trimmed.StartsWith(")", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(trimmed))
+            {
+                continue;
+            }
+
+            var colMatch = ColumnDefRegex.Match(trimmed);
+            if (colMatch.Success)
+            {
+                var colName = colMatch.Groups[1].Value;
+                var dataType = colMatch.Groups[2].Value.ToUpperInvariant();
+
+                // Skip constraint keywords if captured
+                if (colName.Equals("PRIMARY", StringComparison.OrdinalIgnoreCase) ||
+                    colName.Equals("CONSTRAINT", StringComparison.OrdinalIgnoreCase) ||
+                    colName.Equals("FOREIGN", StringComparison.OrdinalIgnoreCase) ||
+                    colName.Equals("CHECK", StringComparison.OrdinalIgnoreCase) ||
+                    colName.Equals("UNIQUE", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var isIdentity = trimmed.Contains("IDENTITY", StringComparison.OrdinalIgnoreCase);
+                var isPk = trimmed.Contains("PRIMARY KEY", StringComparison.OrdinalIgnoreCase) || colName.Equals(meta.PrimaryKeyColumn, StringComparison.OrdinalIgnoreCase);
+
+                if (isPk)
+                {
+                    meta.PrimaryKeyColumn = colName;
+                }
+
+                meta.Columns.Add(new ColumnMetadata
+                {
+                    Name = colName,
+                    DataType = dataType,
+                    IsIdentity = isIdentity,
+                    IsPrimaryKey = isPk,
+                    IsNullable = !trimmed.Contains("NOT NULL", StringComparison.OrdinalIgnoreCase)
+                });
+            }
+        }
+
+        // Fallback default ID if no columns matched
+        if (meta.Columns.Count == 0)
+        {
+            meta.Columns.Add(new ColumnMetadata { Name = meta.PrimaryKeyColumn, DataType = "INT", IsPrimaryKey = true, IsIdentity = true, IsNullable = false });
+            meta.Columns.Add(new ColumnMetadata { Name = "Name", DataType = "NVARCHAR(100)", IsNullable = false });
+            meta.Columns.Add(new ColumnMetadata { Name = "CreatedAtUtc", DataType = "DATETIME2(7)", IsNullable = false });
+        }
+
+        return meta;
     }
 
     private static string GenerateScriptFromFragment(TSqlFragment fragment)

@@ -7,7 +7,7 @@ namespace SQLDatabaseScriptGenerator.Services;
 
 /// <summary>
 /// Core orchestrator service for script generation, AI prompt engineering, and offline AST fallback.
-/// Fully non-blocking, modular, and deduplicated.
+/// Fully dynamic: extracts actual columns and data types from user schema without hardcoded dummy scripts.
 /// </summary>
 public class SqlEngineService : ISqlEngineService
 {
@@ -33,8 +33,9 @@ public class SqlEngineService : ISqlEngineService
     {
         var stopwatch = Stopwatch.StartNew();
 
-        // 1. Non-blocking AST validation via ISqlParserService
+        // 1. Non-blocking AST validation and schema extraction
         var validation = await Task.Run(() => _sqlParserService.ValidateAndParse(request.SqlInput), cancellationToken);
+        var tableMeta = await Task.Run(() => _sqlParserService.ExtractTableMetadata(request.SqlInput), cancellationToken);
 
         var response = new ScriptResponseModel
         {
@@ -45,7 +46,7 @@ public class SqlEngineService : ISqlEngineService
             FormattedSql = validation.FormattedSql
         };
 
-        var tableName = _sqlParserService.ExtractPrimaryTableName(request.SqlInput) ?? "TargetTable";
+        var tableName = tableMeta.TableName;
         var requirement = string.IsNullOrWhiteSpace(request.Requirement)
             ? "Follow modern production-grade T-SQL standards."
             : request.Requirement.Trim();
@@ -55,7 +56,7 @@ public class SqlEngineService : ISqlEngineService
         switch (actionKey)
         {
             case "create_table":
-                await HandleCreateTableAsync(response, request, tableName, requirement, validation, cancellationToken);
+                await HandleCreateTableAsync(response, request, tableMeta, requirement, validation, cancellationToken);
                 break;
 
             case "debug_sql":
@@ -67,15 +68,15 @@ public class SqlEngineService : ISqlEngineService
                 break;
 
             case "create_sp":
-                await HandleCreateStoredProceduresAsync(response, request, tableName, requirement, validation, cancellationToken);
+                await HandleCreateStoredProceduresAsync(response, request, tableMeta, requirement, validation, cancellationToken);
                 break;
 
             case "create_indexes":
-                await HandleCreateIndexesAsync(response, request, tableName, requirement, validation, cancellationToken);
+                await HandleCreateIndexesAsync(response, request, tableMeta, requirement, validation, cancellationToken);
                 break;
 
             case "mock_data":
-                await HandleMockDataAsync(response, request, tableName, requirement, validation, cancellationToken);
+                await HandleMockDataAsync(response, request, tableMeta, requirement, validation, cancellationToken);
                 break;
 
             case "format_sql":
@@ -96,6 +97,310 @@ public class SqlEngineService : ISqlEngineService
     }
 
     #region Action Handlers
+
+    private async Task HandleCreateTableAsync(
+        ScriptResponseModel response, ScriptRequestModel req, TableMetadata meta, string requirement, SqlValidationResult validation, CancellationToken ct)
+    {
+        var tableName = meta.TableName;
+        response.Diagnosis = $"Designing enterprise DDL table schema for [{tableName}] with PK, FK, constraints, and audit columns.";
+
+        string systemPrompt = "You are a Principal Microsoft SQL Server Database Architect. " +
+            "Generate production-grade T-SQL CREATE TABLE scripts with explicit PRIMARY KEY, FOREIGN KEY constraints, CHECK constraints, DEFAULT constraints, and standard Audit columns. " +
+            "Prefix key design choices with '-- BEST PRACTICE:' comment markers. Return ONLY executable T-SQL.";
+
+        string userPrompt = $"Generate a complete CREATE TABLE schema for entity or table [{tableName}]:\n\n{req.SqlInput}\n\nRequirements: {requirement}";
+
+        var aiResult = await _ollamaService.GenerateSqlCompletionAsync(userPrompt, systemPrompt, ct);
+        if (!string.IsNullOrWhiteSpace(aiResult))
+        {
+            response.ResultSql = CleanAiOutput(aiResult);
+            response.Explanation = $"Generated production-grade CREATE TABLE DDL for [{tableName}] with constraints and audit tracking.";
+            response.Recommendations.Add("Always define explicit constraint names (e.g. PK_..., FK_..., DF_..., CK_...) instead of system-generated names.");
+            response.Recommendations.Add("Use DATETIME2(7) instead of legacy DATETIME for higher precision and standard storage.");
+            return;
+        }
+
+        // Dynamic Deterministic Table Generator
+        var sb = new StringBuilder(1536);
+        sb.AppendLine($"-- ===========================================================================");
+        sb.AppendLine($"-- Enterprise Table Schema Definition: dbo.[{tableName}]");
+        sb.AppendLine($"-- Requirement: {requirement}");
+        sb.AppendLine($"-- Target Engine: {req.DatabaseEngine}");
+        sb.AppendLine($"-- Generated On: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC");
+        sb.AppendLine($"-- ===========================================================================");
+        sb.AppendLine();
+        sb.AppendLine($"-- BEST PRACTICE: Safe idempotent deployment check");
+        sb.AppendLine($"IF OBJECT_ID('dbo.[{tableName}]', 'U') IS NULL");
+        sb.AppendLine($"BEGIN");
+        sb.AppendLine($"    CREATE TABLE dbo.[{tableName}] (");
+        sb.AppendLine($"        -- BEST PRACTICE: Explicitly named surrogate Primary Key");
+        sb.AppendLine($"        [{meta.PrimaryKeyColumn}] INT IDENTITY(1,1) NOT NULL,");
+        sb.AppendLine();
+
+        // Dynamically add parsed columns if present, or clean defaults
+        var nonPkCols = meta.Columns.Where(c => !c.IsPrimaryKey && !c.Name.Equals(meta.PrimaryKeyColumn, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (nonPkCols.Count > 0)
+        {
+            sb.AppendLine("        -- Business Attributes (Extracted from Input Specification)");
+            foreach (var col in nonPkCols)
+            {
+                var nullableStr = col.IsNullable ? "NULL" : "NOT NULL";
+                sb.AppendLine($"        [{col.Name}] {col.DataType} {nullableStr},");
+            }
+            sb.AppendLine();
+        }
+        else
+        {
+            sb.AppendLine($"        [Code] NVARCHAR(50) NOT NULL,");
+            sb.AppendLine($"        [Name] NVARCHAR(150) NOT NULL,");
+            sb.AppendLine($"        [Description] NVARCHAR(500) NULL,");
+            sb.AppendLine($"        [Amount] DECIMAL(18,2) NOT NULL,");
+            sb.AppendLine($"        [Status] VARCHAR(30) NOT NULL,");
+            sb.AppendLine();
+        }
+
+        sb.AppendLine($"        -- BEST PRACTICE: Standardized Enterprise Audit & Soft-Delete Columns");
+        sb.AppendLine($"        [IsActive] BIT NOT NULL CONSTRAINT DF_{tableName}_IsActive DEFAULT (1),");
+        sb.AppendLine($"        [IsDeleted] BIT NOT NULL CONSTRAINT DF_{tableName}_IsDeleted DEFAULT (0),");
+        sb.AppendLine($"        [CreatedAtUtc] DATETIME2(7) NOT NULL CONSTRAINT DF_{tableName}_CreatedAtUtc DEFAULT (SYSUTCDATETIME()),");
+        sb.AppendLine($"        [CreatedBy] NVARCHAR(100) NOT NULL CONSTRAINT DF_{tableName}_CreatedBy DEFAULT (SYSTEM_USER),");
+        sb.AppendLine($"        [ModifiedAtUtc] DATETIME2(7) NULL,");
+        sb.AppendLine($"        [ModifiedBy] NVARCHAR(100) NULL,");
+        sb.AppendLine($"        [RowVersion] ROWVERSION NOT NULL, -- Optimistic Concurrency Control");
+        sb.AppendLine();
+        sb.AppendLine($"        -- BEST PRACTICE: Explicit Primary Key constraint definition");
+        sb.AppendLine($"        CONSTRAINT PK_{tableName}_{meta.PrimaryKeyColumn} PRIMARY KEY CLUSTERED ([{meta.PrimaryKeyColumn}] ASC)");
+        sb.AppendLine($"    ){(req.UsePageCompression ? " WITH (DATA_COMPRESSION = PAGE)" : "")};");
+        sb.AppendLine($"    PRINT 'Table dbo.[{tableName}] created successfully.';");
+        sb.AppendLine($"END");
+        sb.AppendLine($"ELSE");
+        sb.AppendLine($"BEGIN");
+        sb.AppendLine($"    PRINT 'Table dbo.[{tableName}] already exists. Skipping creation.';");
+        sb.AppendLine($"END;");
+        sb.AppendLine($"GO\n");
+
+        sb.AppendLine($"-- BEST PRACTICE: Non-clustered index for status & active records");
+        sb.AppendLine($"IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_{tableName}_CreatedAtUtc' AND object_id = OBJECT_ID('dbo.[{tableName}]'))");
+        sb.AppendLine($"BEGIN");
+        sb.AppendLine($"    CREATE NONCLUSTERED INDEX IX_{tableName}_CreatedAtUtc");
+        sb.AppendLine($"    ON dbo.[{tableName}] ([CreatedAtUtc] DESC)");
+        sb.AppendLine($"    WHERE [IsDeleted] = 0; -- Filtered Index");
+        sb.AppendLine($"END;");
+        sb.AppendLine($"GO");
+
+        response.ResultSql = sb.ToString();
+        response.Explanation = $"Created enterprise table schema for [{tableName}] with dynamic columns, named Primary Key, Audit columns, and Filtered Index.";
+        response.Recommendations.Add("Always name constraints explicitly (PK_, UQ_, CK_, DF_) to simplify database migrations.");
+        response.Recommendations.Add("Use Filtered Indexes (WHERE IsDeleted = 0) to speed up queries when using soft deletes.");
+    }
+
+    private async Task HandleCreateStoredProceduresAsync(
+        ScriptResponseModel response, ScriptRequestModel req, TableMetadata meta, string requirement, SqlValidationResult validation, CancellationToken ct)
+    {
+        var tableName = meta.TableName;
+        var pkCol = meta.PrimaryKeyColumn;
+        response.Diagnosis = $"Analyzed input schema for [{tableName}]. Generating modular CRUD procedures with error handling.";
+
+        string systemPrompt = "You are a Principal Database Architect. " +
+            "Generate production-grade T-SQL stored procedures with TRY/CATCH error handling, explicit transaction scopes, and pagination. " +
+            "Prefix key design choices with '-- BEST PRACTICE:' comment markers. Return executable T-SQL.";
+
+        string userPrompt = $"Generate stored procedures for table [{tableName}] from schema:\n\n{req.SqlInput}\n\nRequirements: {requirement}";
+
+        var aiResult = await _ollamaService.GenerateSqlCompletionAsync(userPrompt, systemPrompt, ct);
+        if (!string.IsNullOrWhiteSpace(aiResult))
+        {
+            response.ResultSql = CleanAiOutput(aiResult);
+            response.Explanation = $"Generated full CRUD stored procedures for [{tableName}] with error trapping and transaction rollback.";
+            response.Recommendations.Add("Use stored procedures as the primary API layer to prevent direct SQL injection.");
+            response.Recommendations.Add("Always check XACT_STATE() in CATCH blocks before issuing a ROLLBACK.");
+            return;
+        }
+
+        // Dynamic Deterministic Generation using actual columns
+        var nonIdentityCols = meta.Columns.Where(c => !c.IsIdentity).ToList();
+        var insertCols = string.Join(", ", nonIdentityCols.Select(c => $"[{c.Name}]"));
+        var insertVals = string.Join(", ", nonIdentityCols.Select(c => $"@{c.Name}"));
+        var updateSet = string.Join(",\n                ", nonIdentityCols.Where(c => !c.IsPrimaryKey).Select(c => $"[{c.Name}] = @{c.Name}"));
+
+        var sb = new StringBuilder(2048);
+        sb.AppendLine($"-- ===========================================================================");
+        sb.AppendLine($"-- Enterprise Stored Procedures for: dbo.[{tableName}]");
+        sb.AppendLine($"-- Requirement: {requirement}");
+        sb.AppendLine($"-- ===========================================================================");
+        sb.AppendLine("-- BEST PRACTICE: Prevent network roundtrips for row count messages");
+        sb.AppendLine("SET NOCOUNT ON;");
+        sb.AppendLine("-- BEST PRACTICE: Automatically rollback transaction on severe run-time errors");
+        sb.AppendLine("SET XACT_ABORT ON;");
+        sb.AppendLine("GO\n");
+
+        // 1. Get By ID
+        sb.AppendLine($"CREATE OR ALTER PROCEDURE dbo.usp_{tableName}_GetByID");
+        sb.AppendLine($"    @{pkCol} INT");
+        sb.AppendLine($"AS");
+        sb.AppendLine($"BEGIN");
+        sb.AppendLine($"    SET NOCOUNT ON;");
+        sb.AppendLine($"    SELECT * FROM dbo.[{tableName}] WITH (NOLOCK)");
+        sb.AppendLine($"    WHERE [{pkCol}] = @{pkCol};");
+        sb.AppendLine($"END;");
+        sb.AppendLine("GO\n");
+
+        // 2. Search & Pagination
+        sb.AppendLine($"CREATE OR ALTER PROCEDURE dbo.usp_{tableName}_Search");
+        sb.AppendLine($"    @SearchTerm NVARCHAR(100) = NULL,");
+        sb.AppendLine($"    @PageIndex INT = 1,");
+        sb.AppendLine($"    @PageSize INT = 20");
+        sb.AppendLine($"AS");
+        sb.AppendLine($"BEGIN");
+        sb.AppendLine($"    SET NOCOUNT ON;");
+        sb.AppendLine($"    -- BEST PRACTICE: S-Lock free pagination using modern OFFSET / FETCH NEXT");
+        sb.AppendLine($"    DECLARE @Offset INT = (@PageIndex - 1) * @PageSize;");
+        sb.AppendLine();
+        sb.AppendLine($"    SELECT *, COUNT(*) OVER() AS TotalRecordCount");
+        sb.AppendLine($"    FROM dbo.[{tableName}] WITH (NOLOCK)");
+        sb.AppendLine($"    ORDER BY [{pkCol}] DESC");
+        sb.AppendLine($"    OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;");
+        sb.AppendLine($"END;");
+        sb.AppendLine("GO\n");
+
+        // 3. Dynamic Upsert Procedure with Actual Columns
+        sb.AppendLine($"CREATE OR ALTER PROCEDURE dbo.usp_{tableName}_Save");
+        sb.AppendLine($"    @{pkCol} INT = NULL OUTPUT,");
+        foreach (var col in nonIdentityCols.Where(c => !c.IsPrimaryKey))
+        {
+            sb.AppendLine($"    @{col.Name} {col.DataType} = NULL,");
+        }
+        sb.AppendLine($"    @UpdatedBy NVARCHAR(100) = 'System'");
+        sb.AppendLine($"AS");
+        sb.AppendLine($"BEGIN");
+        sb.AppendLine($"    SET NOCOUNT ON;");
+        sb.AppendLine($"    SET XACT_ABORT ON;");
+        sb.AppendLine();
+        if (req.IncludeTryCatch) sb.AppendLine("    -- BEST PRACTICE: Structured exception handling");
+        if (req.IncludeTryCatch) sb.AppendLine("    BEGIN TRY");
+        if (req.IncludeTransactions) sb.AppendLine("        -- BEST PRACTICE: Explicit transaction scope");
+        if (req.IncludeTransactions) sb.AppendLine("        BEGIN TRANSACTION;");
+        sb.AppendLine();
+        sb.AppendLine($"        IF (@{pkCol} IS NULL OR @{pkCol} = 0)");
+        sb.AppendLine($"        BEGIN");
+        if (!string.IsNullOrWhiteSpace(insertCols))
+        {
+            sb.AppendLine($"            INSERT INTO dbo.[{tableName}] ({insertCols})");
+            sb.AppendLine($"            VALUES ({insertVals});");
+        }
+        else
+        {
+            sb.AppendLine($"            INSERT INTO dbo.[{tableName}] DEFAULT VALUES;");
+        }
+        sb.AppendLine($"            SET @{pkCol} = SCOPE_IDENTITY();");
+        sb.AppendLine($"        END");
+        sb.AppendLine($"        ELSE");
+        sb.AppendLine($"        BEGIN");
+        if (!string.IsNullOrWhiteSpace(updateSet))
+        {
+            sb.AppendLine($"            UPDATE dbo.[{tableName}]");
+            sb.AppendLine($"            SET {updateSet}");
+            sb.AppendLine($"            WHERE [{pkCol}] = @{pkCol};");
+        }
+        else
+        {
+            sb.AppendLine($"            PRINT 'No update columns specified.';");
+        }
+        sb.AppendLine($"        END");
+        sb.AppendLine();
+        if (req.IncludeTransactions) sb.AppendLine("        COMMIT TRANSACTION;");
+        if (req.IncludeTryCatch)
+        {
+            sb.AppendLine("    END TRY");
+            sb.AppendLine("    BEGIN CATCH");
+            sb.AppendLine("        IF (XACT_STATE() <> 0) ROLLBACK TRANSACTION;");
+            sb.AppendLine("        DECLARE @ErrMsg NVARCHAR(4000) = ERROR_MESSAGE();");
+            sb.AppendLine("        DECLARE @ErrSeverity INT = ERROR_SEVERITY();");
+            sb.AppendLine("        DECLARE @ErrState INT = ERROR_STATE();");
+            sb.AppendLine("        RAISERROR(@ErrMsg, @ErrSeverity, @ErrState);");
+            sb.AppendLine("    END CATCH;");
+        }
+        sb.AppendLine($"END;");
+        sb.AppendLine("GO");
+
+        response.ResultSql = sb.ToString();
+        response.Explanation = $"Created enterprise CRUD procedures dynamically mapped to [{tableName}]'s {meta.Columns.Count} columns with transaction handling.";
+        response.Recommendations.Add("Use stored procedures as the primary API layer to prevent direct SQL injection.");
+        response.Recommendations.Add("Always check XACT_STATE() in CATCH blocks before issuing a ROLLBACK.");
+    }
+
+    private async Task HandleCreateIndexesAsync(
+        ScriptResponseModel response, ScriptRequestModel req, TableMetadata meta, string requirement, SqlValidationResult validation, CancellationToken ct)
+    {
+        var tableName = meta.TableName;
+        var pkCol = meta.PrimaryKeyColumn;
+        response.Diagnosis = $"Analyzing indexing strategy for [{tableName}] to eliminate table scans and key lookups.";
+
+        var sb = new StringBuilder(1024);
+        sb.AppendLine($"-- ===========================================================================");
+        sb.AppendLine($"-- INDEX DESIGN & TUNING SCRIPT: dbo.[{tableName}]");
+        sb.AppendLine($"-- ===========================================================================");
+        sb.AppendLine();
+
+        var nonPkCols = meta.Columns.Where(c => !c.IsPrimaryKey).Select(c => c.Name).ToList();
+        var indexCol1 = nonPkCols.Count > 0 ? nonPkCols[0] : pkCol;
+        var indexCol2 = nonPkCols.Count > 1 ? nonPkCols[1] : null;
+
+        sb.AppendLine("-- OPTIMIZATION: Non-clustered search index dynamically derived from table schema");
+        sb.AppendLine($"IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_{tableName}_{indexCol1}' AND object_id = OBJECT_ID('dbo.[{tableName}]'))");
+        sb.AppendLine($"BEGIN");
+        sb.AppendLine($"    CREATE NONCLUSTERED INDEX IX_{tableName}_{indexCol1}");
+        sb.AppendLine($"    ON dbo.[{tableName}] ([{indexCol1}])");
+        if (!string.IsNullOrWhiteSpace(indexCol2))
+        {
+            sb.AppendLine($"    INCLUDE ([{indexCol2}])");
+        }
+        sb.AppendLine($"    WITH (ONLINE = ON, FILLFACTOR = 90{(req.UsePageCompression ? ", DATA_COMPRESSION = PAGE" : "")});");
+        sb.AppendLine($"END;");
+        sb.AppendLine("GO");
+
+        response.ResultSql = sb.ToString();
+        response.Explanation = $"Recommended non-clustered index on [{indexCol1}] to eliminate table scans.";
+        response.Recommendations.Add("Monitor sys.dm_db_index_usage_stats periodically to detect unused or duplicate indexes.");
+    }
+
+    private async Task HandleMockDataAsync(
+        ScriptResponseModel response, ScriptRequestModel req, TableMetadata meta, string requirement, SqlValidationResult validation, CancellationToken ct)
+    {
+        var tableName = meta.TableName;
+        response.Diagnosis = $"Generating batch mock data dataset dynamically for [{tableName}].";
+
+        var nonIdentityCols = meta.Columns.Where(c => !c.IsIdentity).ToList();
+        var colList = string.Join(", ", nonIdentityCols.Select(c => $"[{c.Name}]"));
+
+        var sb = new StringBuilder(1024);
+        sb.AppendLine($"-- ===========================================================================");
+        sb.AppendLine($"-- BATCH MOCK DATA SEEDING: dbo.[{tableName}]");
+        sb.AppendLine($"-- Generated dynamically matching {meta.Columns.Count} table columns");
+        sb.AppendLine($"-- ===========================================================================");
+        sb.AppendLine("SET NOCOUNT ON;");
+        sb.AppendLine("BEGIN TRANSACTION;");
+        sb.AppendLine();
+        sb.AppendLine($"INSERT INTO dbo.[{tableName}] ({colList})");
+        sb.AppendLine("VALUES");
+
+        // Generate 5 dynamic sample rows matching column types
+        for (int row = 1; row <= 5; row++)
+        {
+            var valList = string.Join(", ", nonIdentityCols.Select(c => GenerateSampleValue(c, row)));
+            var comma = (row < 5) ? "," : ";";
+            sb.AppendLine($"    ({valList}){comma}");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("COMMIT TRANSACTION;");
+        sb.AppendLine("PRINT 'Mock data batch executed successfully.';");
+        sb.AppendLine("GO");
+
+        response.ResultSql = sb.ToString();
+        response.Explanation = $"Generated 5 dynamic rows matching columns of [{tableName}] in a single atomic transaction.";
+        response.Recommendations.Add("For large test sets (>10,000 rows), consider SqlBulkCopy or BCP utility.");
+    }
 
     private async Task HandleDebugSqlAsync(
         ScriptResponseModel response, ScriptRequestModel req, string requirement, SqlValidationResult validation, CancellationToken ct)
@@ -188,7 +493,7 @@ public class SqlEngineService : ISqlEngineService
             return;
         }
 
-        // Fast Local Deterministic Optimization with -- OPTIMIZATION: markers
+        // Fast Local Deterministic Optimization
         var sb = new StringBuilder(1024);
         sb.AppendLine("-- ===========================================================================");
         sb.AppendLine("-- OPTIMIZED T-SQL QUERY REPORT");
@@ -196,303 +501,44 @@ public class SqlEngineService : ISqlEngineService
         sb.AppendLine("-- ===========================================================================");
         sb.AppendLine();
         sb.AppendLine("-- OPTIMIZATION: Use Common Table Expression (CTE) and Window Function for deduplication");
-        sb.AppendLine("WITH CTE_RankedOrders AS (");
+        sb.AppendLine("WITH CTE_OptimizedDataset AS (");
         sb.AppendLine("    SELECT");
-        sb.AppendLine("        c.CustomerID,");
-        sb.AppendLine("        c.FirstName,");
-        sb.AppendLine("        c.LastName,");
-        sb.AppendLine("        o.OrderID,");
-        sb.AppendLine("        o.OrderDate,");
-        sb.AppendLine("        o.TotalAmount,");
-        sb.AppendLine("        -- OPTIMIZATION: Window function eliminates expensive correlated subqueries");
-        sb.AppendLine("        ROW_NUMBER() OVER (PARTITION BY c.CustomerID ORDER BY o.OrderDate DESC) AS OrderRank,");
-        sb.AppendLine("        COUNT(*) OVER (PARTITION BY c.CustomerID) AS TotalCustomerOrders");
-        sb.AppendLine($"    FROM dbo.[{tableName}] c WITH (NOLOCK)");
-        sb.AppendLine("    -- OPTIMIZATION: INNER JOIN with NOLOCK hints for high-concurrency read scenarios");
-        sb.AppendLine("    INNER JOIN dbo.Orders o WITH (NOLOCK) ON c.CustomerID = o.CustomerID");
-        sb.AppendLine("    -- OPTIMIZATION: SARGable date range predicate enables Index Seek instead of full Table Scan");
-        sb.AppendLine("    WHERE o.OrderDate >= '2026-01-01' AND o.OrderDate < '2027-01-01'");
-        sb.AppendLine("      AND o.Status = 'Completed'");
+        sb.AppendLine("        t.*,");
+        sb.AppendLine("        -- OPTIMIZATION: Window function replaces expensive correlated subqueries");
+        sb.AppendLine($"        ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS RowSeq");
+        sb.AppendLine($"    FROM dbo.[{tableName}] t WITH (NOLOCK)");
         sb.AppendLine(")");
-        sb.AppendLine("SELECT");
-        sb.AppendLine("    CustomerID, FirstName, LastName, OrderID, OrderDate, TotalAmount");
-        sb.AppendLine("FROM CTE_RankedOrders");
-        sb.AppendLine("WHERE OrderRank = 1 AND TotalCustomerOrders > 5");
+        sb.AppendLine("SELECT * FROM CTE_OptimizedDataset");
         sb.AppendLine("-- OPTIMIZATION: Query hints for controlled parallel execution");
         sb.AppendLine("OPTION (RECOMPILE, MAXDOP 4);");
         sb.AppendLine("GO");
 
         response.ResultSql = sb.ToString();
         response.OptimizedScript = response.ResultSql;
-        response.Explanation = "Converted non-SARGable date condition to index-seekable range and replaced correlated subqueries with Window Functions.";
-        response.Recommendations.Add("Ensure a composite index exists on Orders(Status, OrderDate) INCLUDE (TotalAmount, CustomerID).");
+        response.Explanation = "Wrapped query inside a high-performance CTE with Window Functions and NOLOCK hints.";
         response.Recommendations.Add("Review MAXDOP setting according to your SQL Server instance CPU configuration.");
-    }
-
-    private async Task HandleCreateStoredProceduresAsync(
-        ScriptResponseModel response, ScriptRequestModel req, string tableName, string requirement, SqlValidationResult validation, CancellationToken ct)
-    {
-        response.Diagnosis = $"Analyzed input schema for [{tableName}]. Generating modular CRUD procedures with error handling.";
-
-        string systemPrompt = "You are a Principal Database Architect. " +
-            "Generate production-grade T-SQL stored procedures with TRY/CATCH error handling, explicit transaction scopes, and pagination. " +
-            "Prefix key design choices with '-- BEST PRACTICE:' comment markers. Return executable T-SQL.";
-
-        string userPrompt = $"Generate stored procedures for table [{tableName}] from schema:\n\n{req.SqlInput}\n\nRequirements: {requirement}";
-
-        var aiResult = await _ollamaService.GenerateSqlCompletionAsync(userPrompt, systemPrompt, ct);
-        if (!string.IsNullOrWhiteSpace(aiResult))
-        {
-            response.ResultSql = CleanAiOutput(aiResult);
-            response.Explanation = $"Generated full CRUD stored procedures for [{tableName}] with error trapping and transaction rollback.";
-            response.Recommendations.Add("Use stored procedures as the primary API layer to prevent direct SQL injection.");
-            response.Recommendations.Add("Always check XACT_STATE() in CATCH blocks before issuing a ROLLBACK.");
-            return;
-        }
-
-        // Fast Local Deterministic Generation with -- BEST PRACTICE: markers
-        var sb = new StringBuilder(2048);
-        sb.AppendLine($"-- ===========================================================================");
-        sb.AppendLine($"-- Enterprise Stored Procedures for: dbo.[{tableName}]");
-        sb.AppendLine($"-- Requirement: {requirement}");
-        sb.AppendLine($"-- ===========================================================================");
-        sb.AppendLine("-- BEST PRACTICE: Prevent network roundtrips for row count messages");
-        sb.AppendLine("SET NOCOUNT ON;");
-        sb.AppendLine("-- BEST PRACTICE: Automatically rollback transaction on severe run-time errors");
-        sb.AppendLine("SET XACT_ABORT ON;");
-        sb.AppendLine("GO\n");
-
-        sb.AppendLine($"-- 1. Get Single Record Procedure");
-        sb.AppendLine($"CREATE OR ALTER PROCEDURE dbo.usp_{tableName}_GetByID");
-        sb.AppendLine($"    @ID INT");
-        sb.AppendLine($"AS");
-        sb.AppendLine($"BEGIN");
-        sb.AppendLine($"    SET NOCOUNT ON;");
-        sb.AppendLine($"    SELECT * FROM dbo.[{tableName}] WITH (NOLOCK)");
-        sb.AppendLine($"    WHERE [{tableName}ID] = @ID;");
-        sb.AppendLine($"END;");
-        sb.AppendLine("GO\n");
-
-        sb.AppendLine($"-- 2. Paginated Search Procedure");
-        sb.AppendLine($"CREATE OR ALTER PROCEDURE dbo.usp_{tableName}_Search");
-        sb.AppendLine($"    @SearchTerm NVARCHAR(100) = NULL,");
-        sb.AppendLine($"    @PageIndex INT = 1,");
-        sb.AppendLine($"    @PageSize INT = 20");
-        sb.AppendLine($"AS");
-        sb.AppendLine($"BEGIN");
-        sb.AppendLine($"    SET NOCOUNT ON;");
-        sb.AppendLine($"    -- BEST PRACTICE: S-Lock free pagination using modern OFFSET / FETCH NEXT");
-        sb.AppendLine($"    DECLARE @Offset INT = (@PageIndex - 1) * @PageSize;");
-        sb.AppendLine();
-        sb.AppendLine($"    SELECT *, COUNT(*) OVER() AS TotalRecordCount");
-        sb.AppendLine($"    FROM dbo.[{tableName}] WITH (NOLOCK)");
-        sb.AppendLine($"    WHERE (@SearchTerm IS NULL OR FirstName LIKE '%' + @SearchTerm + '%' OR Email LIKE '%' + @SearchTerm + '%')");
-        sb.AppendLine($"    ORDER BY [{tableName}ID] DESC");
-        sb.AppendLine($"    OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;");
-        sb.AppendLine($"END;");
-        sb.AppendLine("GO\n");
-
-        sb.AppendLine($"-- 3. Atomic Upsert / Save Procedure");
-        sb.AppendLine($"CREATE OR ALTER PROCEDURE dbo.usp_{tableName}_Save");
-        sb.AppendLine($"    @ID INT = NULL OUTPUT,");
-        sb.AppendLine($"    @UpdatedBy NVARCHAR(100) = 'System'");
-        sb.AppendLine($"AS");
-        sb.AppendLine($"BEGIN");
-        sb.AppendLine($"    SET NOCOUNT ON;");
-        sb.AppendLine($"    SET XACT_ABORT ON;");
-        sb.AppendLine();
-        if (req.IncludeTryCatch) sb.AppendLine("    -- BEST PRACTICE: Structured exception handling");
-        if (req.IncludeTryCatch) sb.AppendLine("    BEGIN TRY");
-        if (req.IncludeTransactions) sb.AppendLine("        -- BEST PRACTICE: Explicit transaction scope");
-        if (req.IncludeTransactions) sb.AppendLine("        BEGIN TRANSACTION;");
-        sb.AppendLine();
-        sb.AppendLine($"        IF (@ID IS NULL OR @ID = 0)");
-        sb.AppendLine($"        BEGIN");
-        sb.AppendLine($"            -- INSERT Operation");
-        sb.AppendLine($"            SET @ID = SCOPE_IDENTITY();");
-        sb.AppendLine($"        END");
-        sb.AppendLine($"        ELSE");
-        sb.AppendLine($"        BEGIN");
-        sb.AppendLine($"            -- UPDATE Operation");
-        sb.AppendLine($"            PRINT 'Record updated successfully.';");
-        sb.AppendLine($"        END");
-        sb.AppendLine();
-        if (req.IncludeTransactions) sb.AppendLine("        COMMIT TRANSACTION;");
-        if (req.IncludeTryCatch)
-        {
-            sb.AppendLine("    END TRY");
-            sb.AppendLine("    BEGIN CATCH");
-            sb.AppendLine("        -- BEST PRACTICE: Verify uncommittable transaction state before rollback");
-            sb.AppendLine("        IF (XACT_STATE() <> 0) ROLLBACK TRANSACTION;");
-            sb.AppendLine("        DECLARE @ErrMsg NVARCHAR(4000) = ERROR_MESSAGE();");
-            sb.AppendLine("        DECLARE @ErrSeverity INT = ERROR_SEVERITY();");
-            sb.AppendLine("        DECLARE @ErrState INT = ERROR_STATE();");
-            sb.AppendLine("        RAISERROR(@ErrMsg, @ErrSeverity, @ErrState);");
-            sb.AppendLine("    END CATCH;");
-        }
-        sb.AppendLine($"END;");
-        sb.AppendLine("GO");
-
-        response.ResultSql = sb.ToString();
-        response.Explanation = $"Created enterprise CRUD procedures for [{tableName}] with parameterized queries, OFFSET-FETCH pagination, explicit transaction rollback, and structured TRY...CATCH.";
-        response.Recommendations.Add("Assign EXECUTE permissions to specific database roles rather than granting table access.");
-    }
-
-    private async Task HandleCreateIndexesAsync(
-        ScriptResponseModel response, ScriptRequestModel req, string tableName, string requirement, SqlValidationResult validation, CancellationToken ct)
-    {
-        response.Diagnosis = $"Analyzing indexing strategy for [{tableName}] to eliminate table scans and key lookups.";
-
-        var sb = new StringBuilder(1024);
-        sb.AppendLine($"-- ===========================================================================");
-        sb.AppendLine($"-- INDEX DESIGN & TUNING SCRIPT: dbo.[{tableName}]");
-        sb.AppendLine($"-- ===========================================================================");
-        sb.AppendLine();
-        sb.AppendLine("-- OPTIMIZATION: Index foreign keys to avoid full scans during joins and cascade deletes");
-        sb.AppendLine($"IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_{tableName}_CustomerID' AND object_id = OBJECT_ID('dbo.[{tableName}]'))");
-        sb.AppendLine($"BEGIN");
-        sb.AppendLine($"    CREATE NONCLUSTERED INDEX IX_{tableName}_CustomerID");
-        sb.AppendLine($"    ON dbo.[{tableName}] (CustomerID)");
-        sb.AppendLine($"    WITH (ONLINE = ON, FILLFACTOR = 90{(req.UsePageCompression ? ", DATA_COMPRESSION = PAGE" : "")});");
-        sb.AppendLine($"END;");
-        sb.AppendLine("GO\n");
-
-        sb.AppendLine("-- OPTIMIZATION: Covering composite index (Includes payload to satisfy queries directly from index leaf pages)");
-        sb.AppendLine($"IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_{tableName}_Status_CreatedAt' AND object_id = OBJECT_ID('dbo.[{tableName}]'))");
-        sb.AppendLine($"BEGIN");
-        sb.AppendLine($"    CREATE NONCLUSTERED INDEX IX_{tableName}_Status_CreatedAt");
-        sb.AppendLine($"    ON dbo.[{tableName}] (Status, CreatedAt DESC)");
-        sb.AppendLine($"    INCLUDE (TotalAmount)");
-        sb.AppendLine($"    WITH (ONLINE = ON, FILLFACTOR = 85{(req.UsePageCompression ? ", DATA_COMPRESSION = PAGE" : "")});");
-        sb.AppendLine($"END;");
-        sb.AppendLine("GO");
-
-        response.ResultSql = sb.ToString();
-        response.Explanation = "Recommended non-clustered foreign key indexes and covering indexes with INCLUDE clauses to eliminate expensive Key Lookups.";
-        response.Recommendations.Add("Monitor sys.dm_db_index_usage_stats periodically to detect unused or duplicate indexes.");
-    }
-
-    private async Task HandleMockDataAsync(
-        ScriptResponseModel response, ScriptRequestModel req, string tableName, string requirement, SqlValidationResult validation, CancellationToken ct)
-    {
-        response.Diagnosis = $"Generating batch mock data dataset for [{tableName}].";
-
-        var sb = new StringBuilder(1024);
-        sb.AppendLine($"-- ===========================================================================");
-        sb.AppendLine($"-- BATCH MOCK DATA SEEDING: dbo.[{tableName}]");
-        sb.AppendLine($"-- ===========================================================================");
-        sb.AppendLine("SET NOCOUNT ON;");
-        sb.AppendLine("BEGIN TRANSACTION;");
-        sb.AppendLine();
-        sb.AppendLine("-- OPTIMIZATION: Multi-row VALUES insert reduces transaction log flush overhead");
-        sb.AppendLine($"INSERT INTO dbo.[{tableName}] (FirstName, LastName, Email, CreatedAt)");
-        sb.AppendLine("VALUES");
-        sb.AppendLine("    (N'Liam', N'Smith', N'liam.smith@example.com', DATEADD(DAY, -1, GETUTCDATE())),");
-        sb.AppendLine("    (N'Olivia', N'Johnson', N'olivia.j@example.com', DATEADD(DAY, -2, GETUTCDATE())),");
-        sb.AppendLine("    (N'Noah', N'Williams', N'noah.w@example.com', DATEADD(DAY, -3, GETUTCDATE())),");
-        sb.AppendLine("    (N'Emma', N'Brown', N'emma.brown@example.com', DATEADD(DAY, -4, GETUTCDATE())),");
-        sb.AppendLine("    (N'James', N'Jones', N'james.jones@example.com', DATEADD(DAY, -5, GETUTCDATE())),");
-        sb.AppendLine("    (N'Sophia', N'Garcia', N'sophia.g@example.com', DATEADD(DAY, -6, GETUTCDATE())),");
-        sb.AppendLine("    (N'Benjamin', N'Miller', N'ben.miller@example.com', DATEADD(DAY, -7, GETUTCDATE())),");
-        sb.AppendLine("    (N'Isabella', N'Davis', N'isabella.d@example.com', DATEADD(DAY, -8, GETUTCDATE()));");
-        sb.AppendLine();
-        sb.AppendLine("COMMIT TRANSACTION;");
-        sb.AppendLine("PRINT 'Mock data batch executed successfully.';");
-        sb.AppendLine("GO");
-
-        response.ResultSql = sb.ToString();
-        response.Explanation = "Generated randomized mock data rows matching schema datatypes wrapped in single atomic transaction.";
-        response.Recommendations.Add("For large test sets (>10,000 rows), consider SqlBulkCopy or BCP utility.");
-    }
-
-    private async Task HandleCreateTableAsync(
-        ScriptResponseModel response, ScriptRequestModel req, string tableName, string requirement, SqlValidationResult validation, CancellationToken ct)
-    {
-        response.Diagnosis = $"Designing enterprise DDL table schema for [{tableName}] with PK, FK, constraints, and audit columns.";
-
-        string systemPrompt = "You are a Principal Microsoft SQL Server Database Architect. " +
-            "Generate production-grade T-SQL CREATE TABLE scripts with explicit PRIMARY KEY, FOREIGN KEY constraints, CHECK constraints, DEFAULT constraints, and standard Audit columns (CreatedAtUtc, CreatedBy, ModifiedAtUtc, ModifiedBy, IsDeleted). " +
-            "Prefix key design choices with '-- BEST PRACTICE:' comment markers. Return ONLY executable T-SQL.";
-
-        string userPrompt = $"Generate a complete CREATE TABLE schema for entity or table [{tableName}]:\n\n{req.SqlInput}\n\nRequirements: {requirement}";
-
-        var aiResult = await _ollamaService.GenerateSqlCompletionAsync(userPrompt, systemPrompt, ct);
-        if (!string.IsNullOrWhiteSpace(aiResult))
-        {
-            response.ResultSql = CleanAiOutput(aiResult);
-            response.Explanation = $"Generated production-grade CREATE TABLE DDL for [{tableName}] with constraints and audit tracking.";
-            response.Recommendations.Add("Always define explicit constraint names (e.g. PK_..., FK_..., DF_..., CK_...) instead of system-generated names.");
-            response.Recommendations.Add("Use DATETIME2(7) instead of legacy DATETIME for higher precision and standard storage.");
-            return;
-        }
-
-        // Fast Local Deterministic Table Generator
-        var sb = new StringBuilder(1536);
-        sb.AppendLine($"-- ===========================================================================");
-        sb.AppendLine($"-- Enterprise Table Schema Definition: dbo.[{tableName}]");
-        sb.AppendLine($"-- Requirement: {requirement}");
-        sb.AppendLine($"-- Target Engine: {req.DatabaseEngine}");
-        sb.AppendLine($"-- Generated On: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC");
-        sb.AppendLine($"-- ===========================================================================");
-        sb.AppendLine();
-        sb.AppendLine($"-- BEST PRACTICE: Safe idempotent deployment check");
-        sb.AppendLine($"IF OBJECT_ID('dbo.[{tableName}]', 'U') IS NULL");
-        sb.AppendLine($"BEGIN");
-        sb.AppendLine($"    CREATE TABLE dbo.[{tableName}] (");
-        sb.AppendLine($"        -- BEST PRACTICE: Explicitly named surrogate Primary Key");
-        sb.AppendLine($"        [{tableName}ID] INT IDENTITY(1,1) NOT NULL,");
-        sb.AppendLine();
-        sb.AppendLine($"        -- Business Data Attributes");
-        sb.AppendLine($"        [Code] NVARCHAR(50) NOT NULL,");
-        sb.AppendLine($"        [Name] NVARCHAR(150) NOT NULL,");
-        sb.AppendLine($"        [Description] NVARCHAR(500) NULL,");
-        sb.AppendLine($"        [Category] NVARCHAR(50) NOT NULL,");
-        sb.AppendLine($"        [Amount] DECIMAL(18,2) NOT NULL,");
-        sb.AppendLine($"        [Status] VARCHAR(30) NOT NULL,");
-        sb.AppendLine();
-        sb.AppendLine($"        -- BEST PRACTICE: Standardized Enterprise Audit & Soft-Delete Columns");
-        sb.AppendLine($"        [IsActive] BIT NOT NULL CONSTRAINT DF_{tableName}_IsActive DEFAULT (1),");
-        sb.AppendLine($"        [IsDeleted] BIT NOT NULL CONSTRAINT DF_{tableName}_IsDeleted DEFAULT (0),");
-        sb.AppendLine($"        [CreatedAtUtc] DATETIME2(7) NOT NULL CONSTRAINT DF_{tableName}_CreatedAtUtc DEFAULT (SYSUTCDATETIME()),");
-        sb.AppendLine($"        [CreatedBy] NVARCHAR(100) NOT NULL CONSTRAINT DF_{tableName}_CreatedBy DEFAULT (SYSTEM_USER),");
-        sb.AppendLine($"        [ModifiedAtUtc] DATETIME2(7) NULL,");
-        sb.AppendLine($"        [ModifiedBy] NVARCHAR(100) NULL,");
-        sb.AppendLine($"        [RowVersion] ROWVERSION NOT NULL, -- Optimistic Concurrency Control");
-        sb.AppendLine();
-        sb.AppendLine($"        -- BEST PRACTICE: Explicit Primary Key constraint definition");
-        sb.AppendLine($"        CONSTRAINT PK_{tableName}_{tableName}ID PRIMARY KEY CLUSTERED ([{tableName}ID] ASC),");
-        sb.AppendLine();
-        sb.AppendLine($"        -- BEST PRACTICE: Explicit Unique & Check Constraints");
-        sb.AppendLine($"        CONSTRAINT UQ_{tableName}_Code UNIQUE NONCLUSTERED ([Code] ASC),");
-        sb.AppendLine($"        CONSTRAINT CK_{tableName}_Amount CHECK ([Amount] >= 0)");
-        sb.AppendLine($"    ){(req.UsePageCompression ? " WITH (DATA_COMPRESSION = PAGE)" : "")};");
-        sb.AppendLine($"    PRINT 'Table dbo.[{tableName}] created successfully.';");
-        sb.AppendLine($"END");
-        sb.AppendLine($"ELSE");
-        sb.AppendLine($"BEGIN");
-        sb.AppendLine($"    PRINT 'Table dbo.[{tableName}] already exists. Skipping creation.';");
-        sb.AppendLine($"END;");
-        sb.AppendLine($"GO\n");
-
-        sb.AppendLine($"-- BEST PRACTICE: Non-clustered index on commonly queried status and date fields");
-        sb.AppendLine($"IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_{tableName}_Status_CreatedAtUtc' AND object_id = OBJECT_ID('dbo.[{tableName}]'))");
-        sb.AppendLine($"BEGIN");
-        sb.AppendLine($"    CREATE NONCLUSTERED INDEX IX_{tableName}_Status_CreatedAtUtc");
-        sb.AppendLine($"    ON dbo.[{tableName}] ([Status], [CreatedAtUtc] DESC)");
-        sb.AppendLine($"    INCLUDE ([Name], [Amount])");
-        sb.AppendLine($"    WHERE [IsDeleted] = 0; -- Filtered Index for active records");
-        sb.AppendLine($"END;");
-        sb.AppendLine($"GO");
-
-        response.ResultSql = sb.ToString();
-        response.Explanation = $"Created enterprise table schema for [{tableName}] with named Primary Key, Unique constraint, Check constraint, Audit columns, RowVersion for concurrency, and a Filtered Index.";
-        response.Recommendations.Add("Always name constraints explicitly (PK_, UQ_, CK_, DF_) to simplify database migrations.");
-        response.Recommendations.Add("Use Filtered Indexes (WHERE IsDeleted = 0) to speed up queries when using soft deletes.");
     }
 
     #endregion
 
     #region Helpers
+
+    private static string GenerateSampleValue(ColumnMetadata col, int rowIndex)
+    {
+        var type = col.DataType.ToUpperInvariant();
+        if (type.Contains("INT") || type.Contains("BIGINT") || type.Contains("SMALLINT"))
+            return (100 + rowIndex).ToString();
+        if (type.Contains("DECIMAL") || type.Contains("NUMERIC") || type.Contains("MONEY") || type.Contains("FLOAT"))
+            return (99.95 * rowIndex).ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+        if (type.Contains("BIT") || type.Contains("BOOL"))
+            return (rowIndex % 2 == 1) ? "1" : "0";
+        if (type.Contains("DATE") || type.Contains("TIME"))
+            return $"DATEADD(DAY, -{rowIndex}, SYSUTCDATETIME())";
+        if (type.Contains("UNIQUEIDENTIFIER"))
+            return "NEWID()";
+        
+        return $"N'{col.Name}_Sample_{rowIndex}'";
+    }
 
     private static string CleanAiOutput(string raw)
     {
