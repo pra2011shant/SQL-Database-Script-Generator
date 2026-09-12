@@ -196,16 +196,16 @@ public class SqlParserService : ISqlParserService
 
     private static string ExtractTableNameFromNaturalPrompt(string text)
     {
-        // 1. Check patterns like "MSTPanchayt ka table" or "<Name> ka/ki/ke/ko table"
-        var matches1 = Regex.Matches(text, @"([a-zA-Z0-9_]+)\s+(?:ka|ki|ke|ko)\s+(?:ek\s+)?(?:table|schema)", RegexOptions.IgnoreCase);
+        // 1. Check patterns like "table name [rhega/hoga] [ki/ka/ke/called/named] <Name>"
+        var matches1 = Regex.Matches(text, @"table\s+(?:ka\s+)?(?:name|naam)\s+(?:rhega|hoga|rakhna|is|as|be)?\s*(?:ki|ka|ke|ko|called|named)?\s*([a-zA-Z0-9_]+)", RegexOptions.IgnoreCase);
         foreach (Match m in matches1)
         {
             var val = m.Groups[1].Value;
             if (IsValidIdentifier(val)) return FormatIdentifierName(val);
         }
 
-        // 2. Check patterns like "table name <Name>" or "<Name> table name"
-        var matches2 = Regex.Matches(text, @"([a-zA-Z0-9_]+)\s+table\s+name", RegexOptions.IgnoreCase);
+        // 2. Check patterns like "<Name> [ka/ki/ke/ko] table" (e.g. "mstteacher ka table")
+        var matches2 = Regex.Matches(text, @"([a-zA-Z0-9_]+)\s+(?:ka|ki|ke|ko)\s+(?:ek\s+)?(?:table|schema)", RegexOptions.IgnoreCase);
         foreach (Match m in matches2)
         {
             var val = m.Groups[1].Value;
@@ -220,8 +220,8 @@ public class SqlParserService : ISqlParserService
             if (IsValidIdentifier(val)) return FormatIdentifierName(val);
         }
 
-        // 4. Check "table named/of/for <Name>"
-        var matches4 = Regex.Matches(text, @"table\s+(?:name\s+(?:rhega|hoga|rakhna|is|as)?|named|of|for)?\s*([a-zA-Z0-9_]+)", RegexOptions.IgnoreCase);
+        // 4. Check "<Name> table"
+        var matches4 = Regex.Matches(text, @"([a-zA-Z0-9_]+)\s+table", RegexOptions.IgnoreCase);
         foreach (Match m in matches4)
         {
             var val = m.Groups[1].Value;
@@ -250,8 +250,24 @@ public class SqlParserService : ISqlParserService
             }
         }
 
-        // 1. Extract explicitly mentioned custom columns / tokens (e.g. villcode, dis_code, village_code)
-        var tokenMatches = Regex.Matches(text, @"(?:[a-zA-Z0-9_]+_[a-zA-Z0-9_]+|[a-zA-Z0-9_]+(?:\s*,\s*[a-zA-Z0-9_]+)+|[a-zA-Z0-9_]{3,30})");
+        // 1. Extract columns following "column [rhega/hoga] <cols>" (e.g. "column rhega tachername,teachercode")
+        var colClauseMatch = Regex.Match(text, @"column\s+(?:rhega|hoga|rakhna|is|are|with)?\s*(?:ki|ka|ke)?\s*([a-zA-Z0-9_,\s]+)", RegexOptions.IgnoreCase);
+        if (colClauseMatch.Success)
+        {
+            var parts = colClauseMatch.Groups[1].Value.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var part in parts)
+            {
+                var clean = part.Trim().Trim('[', ']', '(', ')', ';', ':');
+                if (clean.Length > 2 && IsValidColumnCandidate(clean) && !clean.Equals(meta.TableName, StringComparison.OrdinalIgnoreCase))
+                {
+                    var inferredType = InferDataTypeFromColumnName(clean);
+                    TryAdd(clean, inferredType, false);
+                }
+            }
+        }
+
+        // 2. Extract snake_case or comma-separated tokens (e.g. vill_code, dis_code, teacher_name)
+        var tokenMatches = Regex.Matches(text, @"(?:[a-zA-Z0-9_]+_[a-zA-Z0-9_]+|[a-zA-Z0-9_]+(?:\s*,\s*[a-zA-Z0-9_]+)+)");
         foreach (Match match in tokenMatches)
         {
             var parts = match.Value.Split(new[] { ',', ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
