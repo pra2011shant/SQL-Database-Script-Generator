@@ -199,7 +199,7 @@ public class SqlParserService : ISqlParserService
     private static string ExtractTableNameFromNaturalPrompt(string text)
     {
         // Pattern 1: "create [a/an] <Name> table"
-        var m1 = Regex.Match(text, @"(?:create|make|generate|build)\s+(?:a\s+|an\s+)?([a-zA-Z0-9_]+)\s+table", RegexOptions.IgnoreCase);
+        var m1 = Regex.Match(text, @"(?:create|make|generate|build|crete)\s+(?:a\s+|an\s+)?([a-zA-Z0-9_]+)\s+table", RegexOptions.IgnoreCase);
         if (m1.Success && IsValidIdentifier(m1.Groups[1].Value))
             return FormatIdentifierName(m1.Groups[1].Value);
 
@@ -241,7 +241,23 @@ public class SqlParserService : ISqlParserService
             }
         }
 
-        // Generic keyword attribute matching across languages
+        // 1. Extract explicitly mentioned custom columns / snake_case or comma-separated tokens (e.g. vill_code,dis_code)
+        var explicitMatches = Regex.Matches(text, @"(?:[a-zA-Z0-9_]+_[a-zA-Z0-9_]+|[a-zA-Z0-9_]+(?:\s*,\s*[a-zA-Z0-9_]+)+)");
+        foreach (Match match in explicitMatches)
+        {
+            var parts = match.Value.Split(new[] { ',', ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var part in parts)
+            {
+                var cleanPart = part.Trim().Trim('[', ']', '(', ')', ';', ':');
+                if (cleanPart.Length > 1 && IsValidIdentifier(cleanPart) && !cleanPart.Equals(meta.TableName, StringComparison.OrdinalIgnoreCase))
+                {
+                    var inferredType = InferDataTypeFromColumnName(cleanPart);
+                    TryAdd(cleanPart, inferredType, false);
+                }
+            }
+        }
+
+        // 2. Generic keyword attribute matching across languages
         if (lower.Contains("name") || lower.Contains("naam"))
         {
             TryAdd("FirstName", "NVARCHAR(50)", false);
@@ -308,11 +324,29 @@ public class SqlParserService : ISqlParserService
         }
     }
 
+    private static string InferDataTypeFromColumnName(string name)
+    {
+        var lower = name.ToLowerInvariant();
+        if (lower.EndsWith("_id") || lower.EndsWith("id") || lower.EndsWith("_no") || lower.EndsWith("_num") || lower.EndsWith("_count") || lower.EndsWith("_age") || lower.Equals("rollno"))
+            return "INT";
+        if (lower.EndsWith("_code") || lower.EndsWith("code") || lower.EndsWith("_status") || lower.EndsWith("_type") || lower.EndsWith("_key"))
+            return "VARCHAR(50)";
+        if (lower.EndsWith("_amount") || lower.EndsWith("_amt") || lower.EndsWith("_price") || lower.EndsWith("_salary") || lower.EndsWith("_fee") || lower.EndsWith("_tax") || lower.EndsWith("_rate") || lower.EndsWith("_cost") || lower.EndsWith("_marks"))
+            return "DECIMAL(18,2)";
+        if (lower.EndsWith("_date") || lower.EndsWith("_dt") || lower.EndsWith("_dob") || lower.EndsWith("_time"))
+            return "DATE";
+        if (lower.StartsWith("is_") || lower.StartsWith("has_") || lower.EndsWith("_flag") || lower.EndsWith("_active") || lower.EndsWith("_status_bit"))
+            return "BIT";
+        if (lower.EndsWith("_desc") || lower.EndsWith("_description") || lower.EndsWith("_remarks") || lower.EndsWith("_note") || lower.EndsWith("_details") || lower.EndsWith("_address"))
+            return "NVARCHAR(500)";
+        return "NVARCHAR(100)";
+    }
+
     private static bool IsValidIdentifier(string word)
     {
         var ignoreWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "a", "an", "the", "ek", "please", "hii", "hello", "new", "simple", "basic", "custom", "bnao", "bnaoo", "krna"
+            "a", "an", "the", "ek", "please", "hii", "hello", "new", "simple", "basic", "custom", "bnao", "bnaoo", "krna", "or", "and", "me", "esme", "ye", "column", "columns"
         };
         return !string.IsNullOrWhiteSpace(word) && !ignoreWords.Contains(word);
     }
