@@ -8,12 +8,12 @@ namespace SQLDatabaseScriptGenerator.Controllers;
 public class HomeController : Controller
 {
     private readonly ILogger<HomeController> _logger;
-    private readonly ISqlParserService _sqlParserService;
+    private readonly ISqlEngineService _sqlEngineService;
 
-    public HomeController(ILogger<HomeController> logger, ISqlParserService sqlParserService)
+    public HomeController(ILogger<HomeController> logger, ISqlEngineService sqlEngineService)
     {
         _logger = logger;
-        _sqlParserService = sqlParserService;
+        _sqlEngineService = sqlEngineService;
     }
 
     public IActionResult Index()
@@ -23,9 +23,9 @@ public class HomeController : Controller
 
     /// <summary>
     /// Asynchronous endpoint to process SQL scripts and return structured JSON response via AJAX/Fetch API.
+    /// Routes requests through ISqlEngineService (ScriptDom parser + Ollama LLM / prompt engineering).
     /// </summary>
     [HttpPost]
-    [ValidateAntiForgeryToken] // Optional or handled via header, we'll allow standard API calls as well
     [IgnoreAntiforgeryToken]
     public async Task<IActionResult> ProcessSql([FromBody] ScriptRequestModel request, CancellationToken cancellationToken)
     {
@@ -42,12 +42,12 @@ public class HomeController : Controller
         try
         {
             _logger.LogInformation("Processing SQL Action: {Action}", request.Action);
-            var response = await _sqlParserService.ProcessSqlScriptAsync(request, cancellationToken);
+            var response = await _sqlEngineService.ProcessAsync(request, cancellationToken);
             return Ok(response);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error processing SQL request.");
+            _logger.LogError(ex, "Error processing SQL request with action {Action}", request.Action);
             return StatusCode(500, new ScriptResponseModel
             {
                 Success = false,

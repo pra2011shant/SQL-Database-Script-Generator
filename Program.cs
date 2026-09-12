@@ -1,10 +1,20 @@
+using SQLDatabaseScriptGenerator.Models;
 using SQLDatabaseScriptGenerator.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Configure Settings
+builder.Services.Configure<AiSettings>(builder.Configuration.GetSection(AiSettings.SectionName));
+
 // Add services to the container.
 builder.Services.AddControllersWithViews();
+
+// Register HTTP Client for Ollama / LLM provider
+builder.Services.AddHttpClient<IOllamaClientService, OllamaClientService>();
+
+// Register Domain & Core Engine Services
 builder.Services.AddScoped<ISqlParserService, SqlParserService>();
+builder.Services.AddScoped<ISqlEngineService, SqlEngineService>();
 
 var app = builder.Build();
 
@@ -12,7 +22,6 @@ var app = builder.Build();
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Home/Error");
-    // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
     app.UseHsts();
 }
 
