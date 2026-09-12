@@ -10,7 +10,7 @@ builder.Services.Configure<AiSettings>(builder.Configuration.GetSection(AiSettin
 builder.Services.AddControllersWithViews();
 
 // Register HTTP Client for Ollama / LLM provider
-builder.Services.AddHttpClient<IOllamaClientService, OllamaClientService>();
+builder.Services.AddHttpClient<IOllamaService, OllamaService>();
 
 // Register Domain & Core Engine Services
 builder.Services.AddScoped<ISqlParserService, SqlParserService>();

@@ -9,12 +9,12 @@ namespace SQLDatabaseScriptGenerator.Services;
 
 public class SqlEngineService : ISqlEngineService
 {
-    private readonly IOllamaClientService _ollamaClient;
+    private readonly IOllamaService _ollamaService;
     private readonly ILogger<SqlEngineService> _logger;
 
-    public SqlEngineService(IOllamaClientService ollamaClient, ILogger<SqlEngineService> logger)
+    public SqlEngineService(IOllamaService ollamaService, ILogger<SqlEngineService> logger)
     {
-        _ollamaClient = ollamaClient;
+        _ollamaService = ollamaService;
         _logger = logger;
     }
 
@@ -178,7 +178,7 @@ public class SqlEngineService : ISqlEngineService
         string userPrompt = $"Diagnose and fix this flawed SQL script:\n```sql\n{req.SqlInput}\n```\n\n" +
             $"ScriptDom Diagnostics:\n{response.Diagnosis}\n\nRequirements: {requirement}";
 
-        var aiResult = await _ollamaClient.GenerateCompletionAsync(userPrompt, systemPrompt, ct);
+        var aiResult = await _ollamaService.GenerateSqlCompletionAsync(userPrompt, systemPrompt, ct);
         if (!string.IsNullOrWhiteSpace(aiResult))
         {
             response.ResultSql = CleanAiOutput(aiResult);
@@ -233,7 +233,7 @@ public class SqlEngineService : ISqlEngineService
 
         string userPrompt = $"Optimize the following query:\n\n{req.SqlInput}\n\nRequirements: {requirement}";
 
-        var aiResult = await _ollamaClient.GenerateCompletionAsync(userPrompt, systemPrompt, ct);
+        var aiResult = await _ollamaService.GenerateSqlCompletionAsync(userPrompt, systemPrompt, ct);
         if (!string.IsNullOrWhiteSpace(aiResult))
         {
             response.ResultSql = CleanAiOutput(aiResult);
@@ -296,7 +296,7 @@ public class SqlEngineService : ISqlEngineService
 
         string userPrompt = $"Generate stored procedures for table [{tableName}] from schema:\n\n{req.SqlInput}\n\nRequirements: {requirement}";
 
-        var aiResult = await _ollamaClient.GenerateCompletionAsync(userPrompt, systemPrompt, ct);
+        var aiResult = await _ollamaService.GenerateSqlCompletionAsync(userPrompt, systemPrompt, ct);
         if (!string.IsNullOrWhiteSpace(aiResult))
         {
             response.ResultSql = CleanAiOutput(aiResult);
