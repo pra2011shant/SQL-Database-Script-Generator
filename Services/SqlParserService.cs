@@ -7,7 +7,7 @@ namespace SQLDatabaseScriptGenerator.Services;
 
 /// <summary>
 /// High-performance implementation of ISqlParserService utilizing Microsoft ScriptDom.
-/// Dynamic, generic, and supports both formal SQL and natural language prompt parsing.
+/// Pure AST-driven SQL parser, validator, and formatter with zero domain or language hardcoding.
 /// </summary>
 public class SqlParserService : ISqlParserService
 {
@@ -124,8 +124,8 @@ public class SqlParserService : ISqlParserService
         }
         else
         {
-            meta.TableName = ExtractTableNameFromNaturalPrompt(sqlScript);
-            meta.PrimaryKeyColumn = $"{meta.TableName}ID";
+            meta.TableName = "TargetTable";
+            meta.PrimaryKeyColumn = "TargetTableID";
         }
 
         // Parse column definitions dynamically from SQL text
@@ -185,155 +185,17 @@ public class SqlParserService : ISqlParserService
             }
         }
 
-        // Dynamic attribute extraction from natural language if no formal SQL columns were matched
+        // Generic fallback columns if no SQL columns were found in the input
         if (meta.Columns.Count == 0)
         {
-            ExtractDynamicColumnsFromPrompt(sqlScript, meta);
+            meta.Columns.Add(new ColumnMetadata { Name = meta.PrimaryKeyColumn, DataType = "INT", IsPrimaryKey = true, IsIdentity = true, IsNullable = false });
+            meta.Columns.Add(new ColumnMetadata { Name = "Code", DataType = "NVARCHAR(50)", IsNullable = false });
+            meta.Columns.Add(new ColumnMetadata { Name = "Name", DataType = "NVARCHAR(150)", IsNullable = false });
+            meta.Columns.Add(new ColumnMetadata { Name = "Description", DataType = "NVARCHAR(500)", IsNullable = true });
+            meta.Columns.Add(new ColumnMetadata { Name = "Status", DataType = "VARCHAR(30)", IsNullable = false });
         }
 
         return meta;
-    }
-
-    private static string ExtractTableNameFromNaturalPrompt(string text)
-    {
-        // 1. Check patterns like "table name [rhega/hoga] [ki/ka/ke/called/named] <Name>"
-        var matches1 = Regex.Matches(text, @"table\s+(?:ka\s+)?(?:name|naam)\s+(?:rhega|hoga|rakhna|is|as|be)?\s*(?:ki|ka|ke|ko|called|named)?\s*([a-zA-Z0-9_]+)", RegexOptions.IgnoreCase);
-        foreach (Match m in matches1)
-        {
-            var val = m.Groups[1].Value;
-            if (IsValidIdentifier(val)) return FormatIdentifierName(val);
-        }
-
-        // 2. Check patterns like "<Name> [ka/ki/ke/ko] table" (e.g. "mstteacher ka table")
-        var matches2 = Regex.Matches(text, @"([a-zA-Z0-9_]+)\s+(?:ka|ki|ke|ko)\s+(?:ek\s+)?(?:table|schema)", RegexOptions.IgnoreCase);
-        foreach (Match m in matches2)
-        {
-            var val = m.Groups[1].Value;
-            if (IsValidIdentifier(val)) return FormatIdentifierName(val);
-        }
-
-        // 3. Check "create/make <Name> table"
-        var matches3 = Regex.Matches(text, @"(?:create|make|generate|build|crete)\s+(?:a\s+|an\s+|ek\s+)?([a-zA-Z0-9_]+)\s+table", RegexOptions.IgnoreCase);
-        foreach (Match m in matches3)
-        {
-            var val = m.Groups[1].Value;
-            if (IsValidIdentifier(val)) return FormatIdentifierName(val);
-        }
-
-        // 4. Check "<Name> table"
-        var matches4 = Regex.Matches(text, @"([a-zA-Z0-9_]+)\s+table", RegexOptions.IgnoreCase);
-        foreach (Match m in matches4)
-        {
-            var val = m.Groups[1].Value;
-            if (IsValidIdentifier(val)) return FormatIdentifierName(val);
-        }
-
-        return "TargetTable";
-    }
-
-    private static void ExtractDynamicColumnsFromPrompt(string text, TableMetadata meta)
-    {
-        meta.Columns.Add(new ColumnMetadata { Name = meta.PrimaryKeyColumn, DataType = "INT", IsPrimaryKey = true, IsIdentity = true, IsNullable = false });
-
-        var addedCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        void TryAdd(string colName, string dataType, bool nullable)
-        {
-            if (addedCols.Add(colName))
-            {
-                meta.Columns.Add(new ColumnMetadata
-                {
-                    Name = colName,
-                    DataType = dataType,
-                    IsNullable = nullable
-                });
-            }
-        }
-
-        // 1. Extract columns following "column [rhega/hoga] <cols>" (e.g. "column rhega tachername,teachercode")
-        var colClauseMatch = Regex.Match(text, @"column\s+(?:rhega|hoga|rakhna|is|are|with)?\s*(?:ki|ka|ke)?\s*([a-zA-Z0-9_,\s]+)", RegexOptions.IgnoreCase);
-        if (colClauseMatch.Success)
-        {
-            var parts = colClauseMatch.Groups[1].Value.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries);
-            foreach (var part in parts)
-            {
-                var clean = part.Trim().Trim('[', ']', '(', ')', ';', ':');
-                if (clean.Length > 2 && IsValidColumnCandidate(clean) && !clean.Equals(meta.TableName, StringComparison.OrdinalIgnoreCase))
-                {
-                    var inferredType = InferDataTypeFromColumnName(clean);
-                    TryAdd(clean, inferredType, false);
-                }
-            }
-        }
-
-        // 2. Extract snake_case or comma-separated tokens (e.g. vill_code, dis_code, teacher_name)
-        var tokenMatches = Regex.Matches(text, @"(?:[a-zA-Z0-9_]+_[a-zA-Z0-9_]+|[a-zA-Z0-9_]+(?:\s*,\s*[a-zA-Z0-9_]+)+)");
-        foreach (Match match in tokenMatches)
-        {
-            var parts = match.Value.Split(new[] { ',', ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-            foreach (var part in parts)
-            {
-                var cleanPart = part.Trim().Trim('[', ']', '(', ')', ';', ':');
-                if (cleanPart.Length > 2 && IsValidColumnCandidate(cleanPart) && !cleanPart.Equals(meta.TableName, StringComparison.OrdinalIgnoreCase))
-                {
-                    var inferredType = InferDataTypeFromColumnName(cleanPart);
-                    TryAdd(cleanPart, inferredType, false);
-                }
-            }
-        }
-
-        // If no attributes matched, add clean generic columns
-        if (meta.Columns.Count == 1)
-        {
-            TryAdd("Code", "NVARCHAR(50)", false);
-            TryAdd("Name", "NVARCHAR(150)", false);
-            TryAdd("Description", "NVARCHAR(500)", true);
-            TryAdd("Status", "VARCHAR(30)", false);
-        }
-    }
-
-    private static string InferDataTypeFromColumnName(string name)
-    {
-        var lower = name.ToLowerInvariant();
-        if (lower.EndsWith("_id") || lower.EndsWith("id") || lower.EndsWith("_no") || lower.EndsWith("_num") || lower.EndsWith("_count") || lower.EndsWith("_age") || lower.Equals("rollno"))
-            return "INT";
-        if (lower.EndsWith("_code") || lower.EndsWith("code") || lower.EndsWith("_status") || lower.EndsWith("_type") || lower.EndsWith("_key"))
-            return "VARCHAR(50)";
-        if (lower.EndsWith("_amount") || lower.EndsWith("_amt") || lower.EndsWith("_price") || lower.EndsWith("_salary") || lower.EndsWith("_fee") || lower.EndsWith("_tax") || lower.EndsWith("_rate") || lower.EndsWith("_cost") || lower.EndsWith("_marks"))
-            return "DECIMAL(18,2)";
-        if (lower.EndsWith("_date") || lower.EndsWith("_dt") || lower.EndsWith("_dob") || lower.EndsWith("_time"))
-            return "DATE";
-        if (lower.StartsWith("is_") || lower.StartsWith("has_") || lower.EndsWith("_flag") || lower.EndsWith("_active") || lower.EndsWith("_status_bit"))
-            return "BIT";
-        if (lower.EndsWith("_desc") || lower.EndsWith("_description") || lower.EndsWith("_remarks") || lower.EndsWith("_note") || lower.EndsWith("_details") || lower.EndsWith("_address"))
-            return "NVARCHAR(500)";
-        return "NVARCHAR(100)";
-    }
-
-    private static bool IsValidIdentifier(string word)
-    {
-        var ignoreWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "a", "an", "the", "ek", "please", "hii", "hello", "new", "simple", "basic", "custom", "bnao", "bnaoo", "krna", "or", "and", "me", "esme", "ye", "column", "columns", "cahiye", "jo", "usme", "ka", "ki", "ke", "ko", "name", "naam", "rhega", "rhegaa", "hoga", "rakhna", "table", "schema", "mujhe", "jisse", "jisme", "crete", "create", "baisc", "basic"
-        };
-        return !string.IsNullOrWhiteSpace(word) && !ignoreWords.Contains(word) && word.Length > 1;
-    }
-
-    private static bool IsValidColumnCandidate(string word)
-    {
-        var stopWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "a", "an", "the", "ek", "please", "hii", "hello", "new", "simple", "basic", "custom", "bnao", "bnaoo", "krna", "or", "and", "me", "esme", "ye", "column", "columns", "cahiye", "jo", "usme", "ka", "ki", "ke", "ko", "name", "naam", "rhega", "rhegaa", "hoga", "rakhna", "table", "schema", "mujhe", "jisse", "jisme", "crete", "create", "baisc", "basic", "kro", "add", "rkhna", "hamesha", "chahiye"
-        };
-        return !string.IsNullOrWhiteSpace(word) && !stopWords.Contains(word) && word.Length > 2;
-    }
-
-    private static string FormatIdentifierName(string raw)
-    {
-        if (string.IsNullOrWhiteSpace(raw)) return "TargetTable";
-        var clean = Regex.Replace(raw, @"[^a-zA-Z0-9_]", "");
-        if (string.IsNullOrEmpty(clean)) return "TargetTable";
-        return clean;
     }
 
     private static string GenerateScriptFromFragment(TSqlFragment fragment)
