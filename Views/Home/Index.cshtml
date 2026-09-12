@@ -1,8 +1,174 @@
-﻿@{
-    ViewData["Title"] = "Home Page";
+@{
+    ViewData["Title"] = "T-SQL Script Studio";
 }
 
-<div class="text-center">
-    <h1 class="display-4">Welcome</h1>
-    <p>Learn about <a href="https://learn.microsoft.com/aspnet/core">building Web apps with ASP.NET Core</a>.</p>
+<!-- Main Dashboard Container -->
+<div class="d-flex flex-column gap-3 h-100">
+
+    <!-- Top Control Bar -->
+    <div class="control-bar-card">
+        <div class="row g-3 align-items-end">
+            
+            <!-- Action Selector Dropdown -->
+            <div class="col-lg-3 col-md-6">
+                <label for="actionSelect" class="form-label-custom">
+                    <i class="bi bi-gear-wide-connected text-primary"></i> Target Action
+                </label>
+                <select id="actionSelect" class="form-select form-select-custom">
+                    <option value="create_sp" selected>⚡ Create Stored Procedures</option>
+                    <option value="create_indexes">🔍 Create Indexes & Tuning</option>
+                    <option value="debug_sql">🛠️ Debug & Fix SQL (ScriptDom AST)</option>
+                    <option value="optimize_query">🚀 Optimize Query (CTE & Hints)</option>
+                    <option value="mock_data">🎲 Mock Data Generator (Batch INSERT)</option>
+                    <option value="format_sql">🧹 Format & Beautify T-SQL</option>
+                </select>
+            </div>
+
+            <!-- Requirement & Instructions Box -->
+            <div class="col-lg-6 col-md-6">
+                <label for="customRequirement" class="form-label-custom">
+                    <i class="bi bi-chat-left-quote text-info"></i> Custom Requirements & Instructions
+                </label>
+                <input type="text" id="customRequirement" class="form-control form-control-custom" 
+                       placeholder="e.g. Include TRY/CATCH error handling, transactions, and audit logging..." 
+                       value="Generate full CRUD stored procedures with TRY...CATCH and transaction handling." />
+                
+                <!-- Quick Prompt Chips -->
+                <div class="prompt-chips-wrapper">
+                    <span class="prompt-chip" onclick="addPromptChip('Include TRY/CATCH error handling')">+ TRY/CATCH</span>
+                    <span class="prompt-chip" onclick="addPromptChip('Wrap with explicit Transactions')">+ Transactions</span>
+                    <span class="prompt-chip" onclick="addPromptChip('Add NOLOCK table hints')">+ NOLOCK Hints</span>
+                    <span class="prompt-chip" onclick="addPromptChip('Add Pagination with OFFSET/FETCH')">+ Pagination</span>
+                    <span class="prompt-chip" onclick="addPromptChip('Enable PAGE data compression')">+ PAGE Compression</span>
+                    <span class="prompt-chip" onclick="addPromptChip('Add ModifiedDate & CreatedBy audit')">+ Audit Columns</span>
+                </div>
+            </div>
+
+            <!-- Action CTA & View Switcher -->
+            <div class="col-lg-3 col-md-12 d-flex flex-column gap-2 justify-content-end">
+                <button type="button" id="btnExecuteAction" class="btn btn-generate w-100">
+                    <i class="bi bi-lightning-charge-fill"></i> Generate Script
+                    <span class="badge bg-dark-subtle text-light ms-1 d-none d-sm-inline" style="font-size: 0.65rem;">Ctrl+Enter</span>
+                </button>
+
+                <!-- View Layout Switcher Tabs -->
+                <ul class="nav nav-pills view-tabs justify-content-center">
+                    <li class="nav-item">
+                        <button type="button" class="nav-link view-tab-btn active" id="tab-split" onclick="switchLayout('split')">
+                            <i class="bi bi-layout-split"></i> Split
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <button type="button" class="nav-link view-tab-btn" id="tab-input" onclick="switchLayout('input')">
+                            <i class="bi bi-input-cursor-text"></i> Input Only
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <button type="button" class="nav-link view-tab-btn" id="tab-output" onclick="switchLayout('output')">
+                            <i class="bi bi-code-square"></i> Output Only
+                        </button>
+                    </li>
+                </ul>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Monaco Editor Panels (Responsive Split Screen) -->
+    <div class="editors-grid" id="editorsGrid">
+        
+        <!-- Input Panel -->
+        <div class="editor-panel-card" id="inputPanelCard">
+            <div class="editor-header">
+                <div class="editor-title">
+                    <i class="bi bi-file-earmark-code text-primary"></i>
+                    <span>Input Schema / SQL Query</span>
+                    <span class="editor-badge">T-SQL 160</span>
+                </div>
+                
+                <div class="editor-toolbar">
+                    <!-- Template Selector -->
+                    <div class="dropdown d-inline-block">
+                        <button class="btn btn-toolbar-custom dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-collection"></i> Samples
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end shadow">
+                            <li><a class="dropdown-item" href="javascript:void(0)" onclick="loadSample('schema_customers')"><i class="bi bi-table me-2 text-info"></i> Customers & Orders Schema</a></li>
+                            <li><a class="dropdown-item" href="javascript:void(0)" onclick="loadSample('stored_proc_input')"><i class="bi bi-box-seam me-2 text-warning"></i> Products & Inventory Table</a></li>
+                            <li><a class="dropdown-item" href="javascript:void(0)" onclick="loadSample('buggy_sql')"><i class="bi bi-bug me-2 text-danger"></i> Buggy SQL (For Debugging)</a></li>
+                            <li><a class="dropdown-item" href="javascript:void(0)" onclick="loadSample('optimize_query')"><i class="bi bi-speedometer2 me-2 text-success"></i> Unoptimized Query (For Tuning)</a></li>
+                        </ul>
+                    </div>
+
+                    <button type="button" class="btn btn-toolbar-custom" onclick="clearInputEditor()" title="Clear Input">
+                        <i class="bi bi-trash3"></i> Clear
+                    </button>
+                </div>
+            </div>
+
+            <!-- Monaco Input Container -->
+            <div id="inputMonacoContainer" class="monaco-container"></div>
+
+            <!-- Input Status Bar -->
+            <div class="editor-status-bar">
+                <div class="d-flex align-items-center gap-3">
+                    <span id="inputLineCount"><i class="bi bi-list-ol me-1"></i> 0 lines</span>
+                </div>
+                <div class="d-flex align-items-center gap-3">
+                    <span id="inputPosStatus">Ln 1, Col 1</span>
+                    <span>UTF-8</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Output Panel -->
+        <div class="editor-panel-card" id="outputPanelCard">
+            <div class="editor-header">
+                <div class="editor-title">
+                    <i class="bi bi-file-earmark-check text-success"></i>
+                    <span>Generated Output & Diagnostics</span>
+                    <span class="editor-badge">Result</span>
+                </div>
+                
+                <div class="editor-toolbar">
+                    <button type="button" id="btnCopyOutput" class="btn btn-toolbar-custom" onclick="copyOutputToClipboard()" title="Copy to Clipboard">
+                        <i class="bi bi-clipboard"></i> Copy
+                    </button>
+                    <button type="button" class="btn btn-toolbar-custom" onclick="downloadOutputSql()" title="Download .sql Script">
+                        <i class="bi bi-download"></i> Export .sql
+                    </button>
+                    <button type="button" class="btn btn-toolbar-custom" onclick="clearOutputEditor()" title="Clear Output">
+                        <i class="bi bi-x-circle"></i> Clear
+                    </button>
+                </div>
+            </div>
+
+            <!-- Monaco Output Container -->
+            <div id="outputMonacoContainer" class="monaco-container"></div>
+
+            <!-- Collapsible AST Diagnostics Drawer -->
+            <div id="diagnosticsDrawer" class="diagnostics-drawer">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <strong class="text-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i> ScriptDom Syntax Errors Detected:</strong>
+                </div>
+                <div id="diagnosticsList"></div>
+            </div>
+
+            <!-- Output Status Bar -->
+            <div class="editor-status-bar">
+                <div class="d-flex align-items-center gap-2">
+                    <span id="syntaxStatusDot" class="status-dot idle"></span>
+                    <span id="syntaxStatusText">Ready</span>
+                    <span id="batchMetricBadge" class="badge bg-secondary-subtle text-secondary ms-2">0 Batches</span>
+                    <span id="stmtMetricBadge" class="badge bg-secondary-subtle text-secondary">0 Statements</span>
+                </div>
+                <div class="d-flex align-items-center gap-3">
+                    <span id="outputPosStatus">Ln 1, Col 1</span>
+                    <span>T-SQL</span>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
 </div>

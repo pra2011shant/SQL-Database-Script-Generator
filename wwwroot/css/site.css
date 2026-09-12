@@ -1,22 +1,338 @@
-html {
-  font-size: 14px;
-}
-
-@media (min-width: 768px) {
-  html {
-    font-size: 16px;
-  }
-}
-
-.btn:focus, .btn:active:focus, .btn-link.nav-link:focus, .form-control:focus, .form-check-input:focus {
-  box-shadow: 0 0 0 0.1rem white, 0 0 0 0.25rem #258cfb;
-}
-
-html {
-  position: relative;
-  min-height: 100%;
+:root {
+  --bg-main: #0b0f19;
+  --bg-surface: #111827;
+  --bg-surface-elevated: #1e293b;
+  --bg-surface-hover: #334155;
+  --border-color: #1e293b;
+  --border-color-light: #334155;
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --primary-accent: #38bdf8;
+  --primary-accent-glow: rgba(56, 189, 248, 0.25);
+  --primary-gradient: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
+  --success-accent: #10b981;
+  --warning-accent: #f59e0b;
+  --danger-accent: #ef4444;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
 }
 
 body {
-  margin-bottom: 60px;
+  background-color: var(--bg-main);
+  color: var(--text-primary);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-surface);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-color-light);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Navbar */
+.app-navbar {
+  background: rgba(17, 24, 39, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.brand-badge {
+  background: var(--primary-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+
+/* Dashboard Container */
+.dashboard-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 1rem 1.5rem;
+  gap: 1rem;
+}
+
+/* Control Bar */
+.control-bar-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 1rem 1.25rem;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.form-label-custom {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  margin-bottom: 0.35rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.form-control-custom, .form-select-custom {
+  background-color: var(--bg-surface-elevated);
+  border: 1px solid var(--border-color-light);
+  color: var(--text-primary);
+  border-radius: var(--radius-md);
+  font-size: 0.9rem;
+  transition: all 0.2s ease-in-out;
+}
+
+.form-control-custom:focus, .form-select-custom:focus {
+  background-color: var(--bg-surface-elevated);
+  border-color: var(--primary-accent);
+  color: var(--text-primary);
+  box-shadow: 0 0 0 3px var(--primary-accent-glow);
+}
+
+.form-control-custom::placeholder {
+  color: var(--text-muted);
+}
+
+/* Quick prompt chips */
+.prompt-chips-wrapper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.prompt-chip {
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-color-light);
+  color: var(--text-secondary);
+  border-radius: 20px;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s ease;
+}
+
+.prompt-chip:hover {
+  background: var(--bg-surface-hover);
+  color: var(--primary-accent);
+  border-color: var(--primary-accent);
+  transform: translateY(-1px);
+}
+
+/* Action Button */
+.btn-generate {
+  background: var(--primary-gradient);
+  border: none;
+  color: #ffffff;
+  font-weight: 600;
+  padding: 0.65rem 1.5rem;
+  border-radius: var(--radius-md);
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 14px var(--primary-accent-glow);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.btn-generate:hover {
+  transform: translateY(-1.5px);
+  box-shadow: 0 6px 20px rgba(56, 189, 248, 0.4);
+  color: #ffffff;
+}
+
+.btn-generate:active {
+  transform: translateY(0);
+}
+
+/* Editor Panels */
+.editors-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  flex: 1;
+  min-height: 520px;
+}
+
+@media (max-width: 992px) {
+  .editors-grid {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
+}
+
+.editor-panel-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+}
+
+.editor-header {
+  background: var(--bg-surface-elevated);
+  border-bottom: 1px solid var(--border-color);
+  padding: 0.55rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.editor-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-primary);
+}
+
+.editor-badge {
+  background: rgba(56, 189, 248, 0.12);
+  color: var(--primary-accent);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  font-size: 0.7rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.btn-toolbar-custom {
+  background: transparent;
+  border: 1px solid var(--border-color-light);
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  padding: 0.25rem 0.55rem;
+  font-size: 0.78rem;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.btn-toolbar-custom:hover {
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.monaco-container {
+  flex: 1;
+  min-height: 440px;
+  width: 100%;
+}
+
+/* Editor Status Bar */
+.editor-status-bar {
+  background: var(--bg-surface-elevated);
+  border-top: 1px solid var(--border-color);
+  padding: 0.35rem 1rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 0.35rem;
+}
+
+.status-dot.valid {
+  background: var(--success-accent);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+}
+
+.status-dot.invalid {
+  background: var(--danger-accent);
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+}
+
+.status-dot.idle {
+  background: var(--text-muted);
+}
+
+/* Diagnostics Drawer */
+.diagnostics-drawer {
+  background: #180d0d;
+  border-top: 1px solid rgba(239, 68, 68, 0.3);
+  padding: 0.6rem 1rem;
+  font-size: 0.8rem;
+  color: #fca5a5;
+  max-height: 120px;
+  overflow-y: auto;
+  display: none;
+}
+
+.diagnostics-drawer.show {
+  display: block;
+}
+
+.diagnostic-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0;
+  cursor: pointer;
+}
+
+.diagnostic-item:hover {
+  text-decoration: underline;
+}
+
+/* Layout Switcher */
+.view-tabs .nav-link {
+  color: var(--text-muted);
+  border: none;
+  font-size: 0.82rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--radius-sm);
+  transition: all 0.15s ease;
+}
+
+.view-tabs .nav-link.active {
+  background: var(--bg-surface-elevated);
+  color: var(--primary-accent);
+}
+
+/* Footer */
+.app-footer {
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-color);
+  padding: 0.75rem 1.5rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
 }
