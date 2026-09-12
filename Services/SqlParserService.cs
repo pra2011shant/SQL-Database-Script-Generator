@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Text.RegularExpressions;
 using Microsoft.SqlServer.TransactSql.ScriptDom;
@@ -7,7 +8,7 @@ namespace SQLDatabaseScriptGenerator.Services;
 
 /// <summary>
 /// High-performance implementation of ISqlParserService utilizing Microsoft ScriptDom.
-/// Thread-safe, generic, and optimized to minimize memory allocations without domain hardcoding.
+/// Dynamic, generic, and supports both formal SQL and natural language prompt parsing.
 /// </summary>
 public class SqlParserService : ISqlParserService
 {
@@ -124,8 +125,9 @@ public class SqlParserService : ISqlParserService
         }
         else
         {
-            meta.TableName = "TargetTable";
-            meta.PrimaryKeyColumn = "TargetTableID";
+            // Dynamically extract table entity name from natural language prompt
+            meta.TableName = ExtractTableNameFromNaturalPrompt(sqlScript);
+            meta.PrimaryKeyColumn = $"{meta.TableName}ID";
         }
 
         // Parse column definitions dynamically from SQL text
@@ -185,17 +187,142 @@ public class SqlParserService : ISqlParserService
             }
         }
 
-        // Generic fallback columns if no SQL columns were found in the input
+        // Dynamic attribute extraction from natural language if no formal SQL columns were matched
         if (meta.Columns.Count == 0)
         {
-            meta.Columns.Add(new ColumnMetadata { Name = meta.PrimaryKeyColumn, DataType = "INT", IsPrimaryKey = true, IsIdentity = true, IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "Code", DataType = "NVARCHAR(50)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "Name", DataType = "NVARCHAR(150)", IsNullable = false });
-            meta.Columns.Add(new ColumnMetadata { Name = "Description", DataType = "NVARCHAR(500)", IsNullable = true });
-            meta.Columns.Add(new ColumnMetadata { Name = "Status", DataType = "VARCHAR(30)", IsNullable = false });
+            ExtractDynamicColumnsFromPrompt(sqlScript, meta);
         }
 
         return meta;
+    }
+
+    private static string ExtractTableNameFromNaturalPrompt(string text)
+    {
+        // Pattern 1: "create [a/an] <Name> table"
+        var m1 = Regex.Match(text, @"(?:create|make|generate|build)\s+(?:a\s+|an\s+)?([a-zA-Z0-9_]+)\s+table", RegexOptions.IgnoreCase);
+        if (m1.Success && IsValidIdentifier(m1.Groups[1].Value))
+            return FormatIdentifierName(m1.Groups[1].Value);
+
+        // Pattern 2: "<Name> [ka/ki/ke/ko] [ek] table" (Hindi / Hinglish)
+        var m2 = Regex.Match(text, @"([a-zA-Z0-9_]+)\s+(?:ka|ki|ke|ko)\s+(?:ek\s+)?(?:table|schema)", RegexOptions.IgnoreCase);
+        if (m2.Success && IsValidIdentifier(m2.Groups[1].Value))
+            return FormatIdentifierName(m2.Groups[1].Value);
+
+        // Pattern 3: "table [for/of/named] <Name>"
+        var m3 = Regex.Match(text, @"table\s+(?:for|of|named)\s+([a-zA-Z0-9_]+)", RegexOptions.IgnoreCase);
+        if (m3.Success && IsValidIdentifier(m3.Groups[1].Value))
+            return FormatIdentifierName(m3.Groups[1].Value);
+
+        // Pattern 4: "<Name> table"
+        var m4 = Regex.Match(text, @"([a-zA-Z0-9_]+)\s+table", RegexOptions.IgnoreCase);
+        if (m4.Success && IsValidIdentifier(m4.Groups[1].Value))
+            return FormatIdentifierName(m4.Groups[1].Value);
+
+        return "TargetTable";
+    }
+
+    private static void ExtractDynamicColumnsFromPrompt(string text, TableMetadata meta)
+    {
+        meta.Columns.Add(new ColumnMetadata { Name = meta.PrimaryKeyColumn, DataType = "INT", IsPrimaryKey = true, IsIdentity = true, IsNullable = false });
+
+        var lower = text.ToLowerInvariant();
+        var addedCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void TryAdd(string colName, string dataType, bool nullable)
+        {
+            if (addedCols.Add(colName))
+            {
+                meta.Columns.Add(new ColumnMetadata
+                {
+                    Name = colName,
+                    DataType = dataType,
+                    IsNullable = nullable
+                });
+            }
+        }
+
+        // Generic keyword attribute matching across languages
+        if (lower.Contains("name") || lower.Contains("naam"))
+        {
+            TryAdd("FirstName", "NVARCHAR(50)", false);
+            TryAdd("LastName", "NVARCHAR(50)", false);
+        }
+
+        if (lower.Contains("roll") || lower.Contains("rollno") || lower.Contains("roll_no"))
+        {
+            TryAdd("RollNumber", "INT", false);
+        }
+
+        if (lower.Contains("email") || lower.Contains("mail"))
+        {
+            TryAdd("Email", "NVARCHAR(100)", false);
+        }
+
+        if (lower.Contains("phone") || lower.Contains("mobile") || lower.Contains("contact"))
+        {
+            TryAdd("PhoneNumber", "VARCHAR(20)", true);
+        }
+
+        if (lower.Contains("address") || lower.Contains("pata") || lower.Contains("location"))
+        {
+            TryAdd("AddressLine1", "NVARCHAR(200)", false);
+            TryAdd("City", "NVARCHAR(100)", false);
+            TryAdd("State", "NVARCHAR(100)", false);
+            TryAdd("PostalCode", "VARCHAR(20)", true);
+            TryAdd("Country", "NVARCHAR(100)", false);
+        }
+
+        if (lower.Contains("marks") || lower.Contains("score") || lower.Contains("grade"))
+        {
+            TryAdd("Marks", "DECIMAL(5,2)", true);
+            TryAdd("Grade", "VARCHAR(5)", true);
+        }
+
+        if (lower.Contains("salary") || lower.Contains("price") || lower.Contains("amount") || lower.Contains("fee") || lower.Contains("cost"))
+        {
+            TryAdd("Amount", "DECIMAL(18,2)", false);
+        }
+
+        if (lower.Contains("dob") || lower.Contains("birth"))
+        {
+            TryAdd("DateOfBirth", "DATE", false);
+        }
+
+        if (lower.Contains("dept") || lower.Contains("department"))
+        {
+            TryAdd("Department", "NVARCHAR(100)", true);
+        }
+
+        if (lower.Contains("gender") || lower.Contains("sex"))
+        {
+            TryAdd("Gender", "VARCHAR(10)", true);
+        }
+
+        // If no attributes matched, add clean generic columns
+        if (meta.Columns.Count == 1)
+        {
+            TryAdd("Code", "NVARCHAR(50)", false);
+            TryAdd("Name", "NVARCHAR(150)", false);
+            TryAdd("Description", "NVARCHAR(500)", true);
+            TryAdd("Status", "VARCHAR(30)", false);
+        }
+    }
+
+    private static bool IsValidIdentifier(string word)
+    {
+        var ignoreWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "a", "an", "the", "ek", "please", "hii", "hello", "new", "simple", "basic", "custom", "bnao", "bnaoo", "krna"
+        };
+        return !string.IsNullOrWhiteSpace(word) && !ignoreWords.Contains(word);
+    }
+
+    private static string FormatIdentifierName(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return "TargetTable";
+        var clean = Regex.Replace(raw, @"[^a-zA-Z0-9_]", "");
+        if (string.IsNullOrEmpty(clean)) return "TargetTable";
+        return char.ToUpperInvariant(clean[0]) + clean.Substring(1);
     }
 
     private static string GenerateScriptFromFragment(TSqlFragment fragment)
