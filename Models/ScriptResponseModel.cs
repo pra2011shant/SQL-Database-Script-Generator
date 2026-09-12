@@ -20,6 +20,22 @@ public class ScriptResponseModel
     [JsonPropertyName("resultSql")]
     public string ResultSql { get; set; } = string.Empty;
 
+    [JsonProperty("correctedScript")]
+    [JsonPropertyName("correctedScript")]
+    public string CorrectedScript { get; set; } = string.Empty;
+
+    [JsonProperty("optimizedScript")]
+    [JsonPropertyName("optimizedScript")]
+    public string OptimizedScript { get; set; } = string.Empty;
+
+    [JsonProperty("explanation")]
+    [JsonPropertyName("explanation")]
+    public string Explanation { get; set; } = string.Empty;
+
+    [JsonProperty("diagnosis")]
+    [JsonPropertyName("diagnosis")]
+    public string Diagnosis { get; set; } = string.Empty;
+
     [JsonProperty("formattedSql")]
     [JsonPropertyName("formattedSql")]
     public string FormattedSql { get; set; } = string.Empty;

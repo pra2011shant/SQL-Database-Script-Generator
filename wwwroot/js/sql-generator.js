@@ -289,6 +289,24 @@ document.addEventListener('DOMContentLoaded', () => {
                         outputEditor.setValue(data.resultSql || data.formattedSql || '-- No output returned');
                     }
 
+                    // Populate Analysis & Explanation Cards
+                    const diagElem = document.getElementById('analysisDiagnosisText');
+                    if (diagElem) {
+                        diagElem.innerText = data.diagnosis || 'No issues detected during analysis.';
+                    }
+
+                    const expElem = document.getElementById('analysisExplanationText');
+                    if (expElem) {
+                        expElem.innerText = data.explanation || 'Processed successfully using T-SQL standards.';
+                    }
+
+                    const recList = document.getElementById('analysisRecommendationsList');
+                    if (recList && data.recommendations && data.recommendations.length > 0) {
+                        recList.innerHTML = data.recommendations.map(r => `<li>${r}</li>`).join('');
+                    } else if (recList) {
+                        recList.innerHTML = `<li>Follow standard database normalization and indexing guidelines.</li>`;
+                    }
+
                     // Update status bar & diagnostics
                     const statusDot = document.getElementById('syntaxStatusDot');
                     const statusText = document.getElementById('syntaxStatusText');
@@ -341,3 +359,16 @@ function jumpToLine(line, col) {
         inputEditor.focus();
     }
 }
+
+// Ensure Monaco layouts properly when output tab is clicked
+document.addEventListener('DOMContentLoaded', () => {
+    const codeTabBtn = document.getElementById('tab-code-btn');
+    if (codeTabBtn) {
+        codeTabBtn.addEventListener('shown.bs.tab', () => {
+            if (outputEditor) {
+                setTimeout(() => outputEditor.layout(), 50);
+            }
+        });
+    }
+});
+

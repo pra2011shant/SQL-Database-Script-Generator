@@ -60,12 +60,12 @@
                     </li>
                     <li class="nav-item">
                         <button type="button" class="nav-link view-tab-btn" id="tab-input" onclick="switchLayout('input')">
-                            <i class="bi bi-input-cursor-text"></i> Input Only
+                            <i class="bi bi-input-cursor-text"></i> Input
                         </button>
                     </li>
                     <li class="nav-item">
                         <button type="button" class="nav-link view-tab-btn" id="tab-output" onclick="switchLayout('output')">
-                            <i class="bi bi-code-square"></i> Output Only
+                            <i class="bi bi-code-square"></i> Output
                         </button>
                     </li>
                 </ul>
@@ -124,10 +124,19 @@
         <!-- Output Panel -->
         <div class="editor-panel-card" id="outputPanelCard">
             <div class="editor-header">
-                <div class="editor-title">
-                    <i class="bi bi-file-earmark-check text-success"></i>
-                    <span>Generated Output & Diagnostics</span>
-                    <span class="editor-badge">Result</span>
+                <div class="d-flex align-items-center gap-2">
+                    <ul class="nav nav-pills" id="outputTabs" role="tablist" style="font-size: 0.8rem;">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active py-1 px-2 text-light" id="tab-code-btn" data-bs-toggle="tab" data-bs-target="#outputTabCode" type="button" role="tab">
+                                <i class="bi bi-file-earmark-check text-success me-1"></i> Generated Script
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link py-1 px-2 text-light" id="tab-analysis-btn" data-bs-toggle="tab" data-bs-target="#outputTabAnalysis" type="button" role="tab">
+                                <i class="bi bi-lightbulb-fill text-warning me-1"></i> Analysis & Explanation
+                            </button>
+                        </li>
+                    </ul>
                 </div>
                 
                 <div class="editor-toolbar">
@@ -143,8 +152,49 @@
                 </div>
             </div>
 
-            <!-- Monaco Output Container -->
-            <div id="outputMonacoContainer" class="monaco-container"></div>
+            <div class="tab-content flex-grow-1 d-flex flex-column" style="min-height: 440px;">
+                <!-- Tab 1: Monaco Output Editor -->
+                <div class="tab-pane fade show active flex-grow-1 d-flex flex-column h-100" id="outputTabCode" role="tabpanel">
+                    <div id="outputMonacoContainer" class="monaco-container h-100"></div>
+                </div>
+
+                <!-- Tab 2: Structured Explanation & Recommendations Card -->
+                <div class="tab-pane fade p-3 overflow-auto flex-grow-1" id="outputTabAnalysis" role="tabpanel" style="max-height: 460px; background: #0f172a;">
+                    <div class="d-flex flex-column gap-3">
+                        <!-- Diagnosis Section -->
+                        <div class="card bg-dark border-secondary">
+                            <div class="card-header bg-dark border-secondary text-info fw-bold d-flex align-items-center gap-2">
+                                <i class="bi bi-clipboard2-pulse"></i> Diagnostic Assessment
+                            </div>
+                            <div class="card-body py-2 px-3 text-light" id="analysisDiagnosisText" style="font-size: 0.88rem;">
+                                No analysis generated yet. Run an action to inspect the script.
+                            </div>
+                        </div>
+
+                        <!-- Plain Language Explanation -->
+                        <div class="card bg-dark border-secondary">
+                            <div class="card-header bg-dark border-secondary text-success fw-bold d-flex align-items-center gap-2">
+                                <i class="bi bi-journal-check"></i> Explanation of Changes
+                            </div>
+                            <div class="card-body py-2 px-3 text-light" id="analysisExplanationText" style="font-size: 0.88rem;">
+                                Execution breakdown and rationale will appear here.
+                            </div>
+                        </div>
+
+                        <!-- Recommendations List -->
+                        <div class="card bg-dark border-secondary">
+                            <div class="card-header bg-dark border-secondary text-warning fw-bold d-flex align-items-center gap-2">
+                                <i class="bi bi-shield-check"></i> Best Practice Recommendations
+                            </div>
+                            <div class="card-body py-2 px-3">
+                                <ul class="mb-0 ps-3 text-light" id="analysisRecommendationsList" style="font-size: 0.85rem;">
+                                    <li>Recommendations will be displayed once generated.</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
             <!-- Collapsible AST Diagnostics Drawer -->
             <div id="diagnosticsDrawer" class="diagnostics-drawer">
