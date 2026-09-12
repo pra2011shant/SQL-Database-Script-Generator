@@ -1,17 +1,31 @@
 /**
- * SQL Database Script Generator - Monaco Editor & UI Controller
- * Pure client-side UI controller: All SQL parsing, templates, and generation are handled on backend.
+ * SQL Database Script Generator - High-Performance Monaco Controller
+ * - Zero hardcoded SQL queries (100% backend driven)
+ * - Debounced input tracking (Zero UI lag / No screen freezes)
+ * - Lazy loaded sample templates with local caching
+ * - Non-blocking asynchronous AJAX fetch with AbortController
  */
 
 let inputEditor = null;
 let outputEditor = null;
+let activeAbortController = null;
+const templateCache = new Map();
+
+// Debounce helper to keep UI 60fps smooth
+function debounce(func, wait) {
+    let timeout;
+    return function (...args) {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func.apply(this, args), wait);
+    };
+}
 
 // Initialize Monaco Editors via RequireJS CDN
 function initMonaco() {
     require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' } });
 
     require(['vs/editor/editor.main'], function () {
-        // Register custom theme
+        // Theme definition
         monaco.editor.defineTheme('sqlDarkModern', {
             base: 'vs-dark',
             inherit: true,
@@ -32,14 +46,13 @@ function initMonaco() {
             }
         });
 
-        // Create Input Editor
-        inputEditor = monaco.editor.create(document.getElementById('inputMonacoContainer'), {
-            value: '',
+        // Common Editor Options
+        const commonOptions = {
             language: 'sql',
             theme: 'sqlDarkModern',
             automaticLayout: true,
             fontSize: 13,
-            fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
+            fontFamily: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
             minimap: { enabled: true, maxColumn: 40 },
             scrollBeyondLastLine: false,
             wordWrap: 'on',
@@ -47,94 +60,108 @@ function initMonaco() {
             renderWhitespace: 'selection',
             bracketPairColorization: { enabled: true },
             formatOnPaste: true
+        };
+
+        // Create Input Editor
+        inputEditor = monaco.editor.create(document.getElementById('inputMonacoContainer'), {
+            ...commonOptions,
+            value: ''
         });
 
         // Create Output Editor
         outputEditor = monaco.editor.create(document.getElementById('outputMonacoContainer'), {
+            ...commonOptions,
             value: '',
-            language: 'sql',
-            theme: 'sqlDarkModern',
-            automaticLayout: true,
-            fontSize: 13,
-            fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
-            minimap: { enabled: true, maxColumn: 40 },
-            scrollBeyondLastLine: false,
-            wordWrap: 'on',
-            lineNumbers: 'on',
-            readOnly: false,
-            bracketPairColorization: { enabled: true }
+            readOnly: false
         });
 
-        // Track cursor position in input editor
+        // Debounced metrics update (Prevents typing lag)
+        const updateMetricsDebounced = debounce(() => {
+            if (!inputEditor) return;
+            const model = inputEditor.getModel();
+            if (model) {
+                const lines = model.getLineCount();
+                const chars = model.getValueLength();
+                const countElem = document.getElementById('inputLineCount');
+                if (countElem) countElem.innerText = `${lines} lines (${chars} chars)`;
+            }
+        }, 150);
+
+        inputEditor.onDidChangeModelContent(updateMetricsDebounced);
+
+        // Cursor position tracking
         inputEditor.onDidChangeCursorPosition(e => {
             const pos = e.position;
-            document.getElementById('inputPosStatus').innerText = `Ln ${pos.lineNumber}, Col ${pos.column}`;
+            const posElem = document.getElementById('inputPosStatus');
+            if (posElem) posElem.innerText = `Ln ${pos.lineNumber}, Col ${pos.column}`;
         });
 
-        // Track changes to update line/char counts
-        inputEditor.onDidChangeModelContent(() => {
-            const val = inputEditor.getValue();
-            const lines = inputEditor.getModel().getLineCount();
-            document.getElementById('inputLineCount').innerText = `${lines} lines (${val.length} chars)`;
-        });
-
-        // Track cursor position in output editor
         outputEditor.onDidChangeCursorPosition(e => {
             const pos = e.position;
-            document.getElementById('outputPosStatus').innerText = `Ln ${pos.lineNumber}, Col ${pos.column}`;
+            const posElem = document.getElementById('outputPosStatus');
+            if (posElem) posElem.innerText = `Ln ${pos.lineNumber}, Col ${pos.column}`;
         });
 
-        // Keyboard Shortcut: Ctrl + Enter to Generate
+        // Shortcut: Ctrl + Enter to Generate
         inputEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, function () {
-            document.getElementById('btnExecuteAction').click();
+            const btn = document.getElementById('btnExecuteAction');
+            if (btn) btn.click();
         });
 
-        // Initial default sample load from backend
+        // Lazy load default customer orders schema
         loadSample('schema_customers');
     });
 }
 
-// Fetch Sample Schema dynamically from backend API
+// Lazy Load & Cache Sample Templates from Backend
 async function loadSample(sampleKey) {
     if (!sampleKey) return;
 
     try {
-        const response = await fetch(`/Home/GetSampleTemplate?key=${encodeURIComponent(sampleKey)}`);
-        if (response.ok) {
-            const data = await response.json();
-            if (inputEditor && data.sql) {
-                inputEditor.setValue(data.sql);
-            }
-
-            // Automatically set recommended default requirements
-            const actionSelect = document.getElementById('actionSelect');
-            const reqInput = document.getElementById('customRequirement');
-
-            if (sampleKey === 'buggy_sql') {
-                actionSelect.value = 'debug_sql';
-                reqInput.value = 'Fix all syntax and grammatical errors, format properly with semicolons.';
-            } else if (sampleKey === 'optimize_query') {
-                actionSelect.value = 'optimize_query';
-                reqInput.value = 'Optimize joins, avoid non-SARGable WHERE predicates, and suggest indexes.';
-            } else if (sampleKey === 'stored_proc_input') {
-                actionSelect.value = 'create_sp';
-                reqInput.value = 'Generate CRUD stored procedures with TRY...CATCH error handling and transactions.';
-            } else {
-                actionSelect.value = 'create_sp';
-                reqInput.value = 'Generate full CRUD stored procedures with TRY...CATCH and transaction handling.';
+        let sqlText = '';
+        if (templateCache.has(sampleKey)) {
+            sqlText = templateCache.get(sampleKey);
+        } else {
+            const response = await fetch(`/Home/GetSampleTemplate?key=${encodeURIComponent(sampleKey)}`);
+            if (response.ok) {
+                const data = await response.json();
+                sqlText = data.sql || '';
+                templateCache.set(sampleKey, sqlText);
             }
         }
+
+        if (inputEditor && sqlText) {
+            inputEditor.setValue(sqlText);
+        }
+
+        // Set contextual requirement text
+        const actionSelect = document.getElementById('actionSelect');
+        const reqInput = document.getElementById('customRequirement');
+
+        if (sampleKey === 'buggy_sql') {
+            if (actionSelect) actionSelect.value = 'debug_sql';
+            if (reqInput) reqInput.value = 'Fix all syntax and grammatical errors, format properly with semicolons.';
+        } else if (sampleKey === 'optimize_query') {
+            if (actionSelect) actionSelect.value = 'optimize_query';
+            if (reqInput) reqInput.value = 'Optimize joins, avoid non-SARGable WHERE predicates, and suggest indexes.';
+        } else if (sampleKey === 'stored_proc_input') {
+            if (actionSelect) actionSelect.value = 'create_sp';
+            if (reqInput) reqInput.value = 'Generate CRUD stored procedures with TRY...CATCH error handling and transactions.';
+        } else {
+            if (actionSelect) actionSelect.value = 'create_sp';
+            if (reqInput) reqInput.value = 'Generate full CRUD stored procedures with TRY...CATCH and transaction handling.';
+        }
     } catch (err) {
-        console.error('Failed to load template from server:', err);
+        console.error('Error loading template:', err);
     }
 }
 
-// Add chip prompt to custom requirement box
+// Add prompt chip
 function addPromptChip(text) {
     const reqBox = document.getElementById('customRequirement');
     if (reqBox) {
         const current = reqBox.value.trim();
-        if (current.length === 0) {
+        if (!current) {
             reqBox.value = text;
         } else if (!current.includes(text)) {
             reqBox.value = `${current}, ${text}`;
@@ -143,19 +170,21 @@ function addPromptChip(text) {
     }
 }
 
-// Copy output to clipboard
+// Copy output
 function copyOutputToClipboard() {
     if (!outputEditor) return;
     const text = outputEditor.getValue();
     navigator.clipboard.writeText(text).then(() => {
         const btn = document.getElementById('btnCopyOutput');
-        const originalHtml = btn.innerHTML;
-        btn.innerHTML = `<i class="bi bi-check2"></i> Copied!`;
-        setTimeout(() => { btn.innerHTML = originalHtml; }, 2000);
+        if (btn) {
+            const originalHtml = btn.innerHTML;
+            btn.innerHTML = `<i class="bi bi-check2"></i> Copied!`;
+            setTimeout(() => { btn.innerHTML = originalHtml; }, 2000);
+        }
     });
 }
 
-// Download output as .sql file
+// Download output
 function downloadOutputSql() {
     if (!outputEditor) return;
     const text = outputEditor.getValue();
@@ -167,7 +196,7 @@ function downloadOutputSql() {
     link.click();
 }
 
-// Clear input editor
+// Clear editors
 function clearInputEditor() {
     if (inputEditor) {
         inputEditor.setValue('');
@@ -175,21 +204,21 @@ function clearInputEditor() {
     }
 }
 
-// Clear output editor
 function clearOutputEditor() {
     if (outputEditor) {
         outputEditor.setValue('');
     }
 }
 
-// Switch layout view mode
+// Switch layout view modes
 function switchLayout(mode) {
     const inputCard = document.getElementById('inputPanelCard');
     const outputCard = document.getElementById('outputPanelCard');
     const grid = document.getElementById('editorsGrid');
 
     document.querySelectorAll('.view-tab-btn').forEach(btn => btn.classList.remove('active'));
-    document.getElementById(`tab-${mode}`).classList.add('active');
+    const targetTab = document.getElementById(`tab-${mode}`);
+    if (targetTab) targetTab.classList.add('active');
 
     if (mode === 'split') {
         grid.style.gridTemplateColumns = '1fr 1fr';
@@ -205,11 +234,11 @@ function switchLayout(mode) {
         outputCard.style.display = 'flex';
     }
 
-    if (inputEditor) inputEditor.layout();
-    if (outputEditor) outputEditor.layout();
+    if (inputEditor) requestAnimationFrame(() => inputEditor.layout());
+    if (outputEditor) requestAnimationFrame(() => outputEditor.layout());
 }
 
-// Jump to line in input editor from diagnostics drawer
+// Jump to line in input editor
 function jumpToLine(line, col) {
     if (inputEditor && line > 0) {
         inputEditor.revealPositionInCenter({ lineNumber: line, column: col || 1 });
@@ -218,7 +247,7 @@ function jumpToLine(line, col) {
     }
 }
 
-// Main event initializations
+// DOM Event Bindings
 document.addEventListener('DOMContentLoaded', () => {
     initMonaco();
 
@@ -227,7 +256,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (codeTabBtn) {
         codeTabBtn.addEventListener('shown.bs.tab', () => {
             if (outputEditor) {
-                setTimeout(() => outputEditor.layout(), 50);
+                requestAnimationFrame(() => outputEditor.layout());
             }
         });
     }
@@ -245,12 +274,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
+            // Abort previous in-flight request if any
+            if (activeAbortController) {
+                activeAbortController.abort();
+            }
+            activeAbortController = new AbortController();
+
             // Set loading state
             btnExec.disabled = true;
             btnExec.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Processing...`;
 
             try {
-                // Call server generation endpoint
                 const response = await fetch('/Home/ProcessSql', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -262,7 +296,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         includeTryCatch: true,
                         includeTransactions: true,
                         includeComments: true
-                    })
+                    }),
+                    signal: activeAbortController.signal
                 });
 
                 if (response.ok) {
@@ -279,7 +314,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     const expElem = document.getElementById('analysisExplanationText');
                     if (expElem) {
-                        expElem.innerText = data.explanation || 'Processed successfully using T-SQL standards.';
+                        expElem.innerText = data.explanation || 'Processed successfully using modern T-SQL standards.';
                     }
 
                     const recList = document.getElementById('analysisRecommendationsList');
@@ -317,17 +352,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 } else {
                     if (outputEditor) {
-                        outputEditor.setValue(`-- Error executing request: Server responded with status ${response.status}`);
+                        outputEditor.setValue(`-- Error executing request: Server responded with HTTP status ${response.status}`);
                     }
                 }
             } catch (err) {
-                console.error(err);
-                if (outputEditor) {
-                    outputEditor.setValue(`-- Request failed: ${err.message}`);
+                if (err.name !== 'AbortError') {
+                    console.error(err);
+                    if (outputEditor) {
+                        outputEditor.setValue(`-- Request failed: ${err.message}`);
+                    }
                 }
             } finally {
                 btnExec.disabled = false;
                 btnExec.innerHTML = `<i class="bi bi-lightning-charge-fill"></i> Generate Script`;
+                activeAbortController = null;
             }
         });
     }
