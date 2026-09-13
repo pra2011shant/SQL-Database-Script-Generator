@@ -399,9 +399,129 @@ async function saveCorporateStandards() {
     }
 }
 
+// AI Configuration Load & Save
+function toggleAiProviderFields() {
+    const provider = document.getElementById('cfgAiProvider').value;
+    document.querySelectorAll('.ai-provider-section').forEach(el => el.style.display = 'none');
+    
+    if (provider === 'Gemini') {
+        const sec = document.getElementById('sectionGemini');
+        if (sec) sec.style.display = 'block';
+    } else if (provider === 'Groq') {
+        const sec = document.getElementById('sectionGroq');
+        if (sec) sec.style.display = 'block';
+    } else if (provider === 'Ollama') {
+        const sec = document.getElementById('sectionOllama');
+        if (sec) sec.style.display = 'block';
+    }
+}
+
+async function loadAiConfig() {
+    try {
+        const response = await fetch('/Home/GetAiConfig');
+        if (response.ok) {
+            const data = await response.json();
+            const provSelect = document.getElementById('cfgAiProvider');
+            if (provSelect) provSelect.value = data.provider || 'Gemini';
+            
+            const geminiKey = document.getElementById('cfgGeminiKey');
+            if (geminiKey) geminiKey.value = data.geminiApiKey || '';
+
+            const geminiModel = document.getElementById('cfgGeminiModel');
+            if (geminiModel) geminiModel.value = data.geminiModel || 'gemini-1.5-flash';
+
+            const groqKey = document.getElementById('cfgGroqKey');
+            if (groqKey) groqKey.value = data.groqApiKey || '';
+
+            const groqModel = document.getElementById('cfgGroqModel');
+            if (groqModel) groqModel.value = data.groqModel || 'llama-3.3-70b-versatile';
+
+            const ollamaUrl = document.getElementById('cfgOllamaUrl');
+            if (ollamaUrl) ollamaUrl.value = data.ollamaBaseUrl || 'http://localhost:11434';
+
+            const ollamaModel = document.getElementById('cfgOllamaModel');
+            if (ollamaModel) ollamaModel.value = data.model || 'codellama';
+
+            const enableAi = document.getElementById('cfgEnableAi');
+            if (enableAi) enableAi.checked = data.enableAiEnhancement ?? true;
+
+            const fallbackAst = document.getElementById('cfgFallbackAst');
+            if (fallbackAst) fallbackAst.checked = data.fallbackToLocalGenerator ?? true;
+
+            toggleAiProviderFields();
+            updateAiBadge(data.provider || 'Gemini');
+        }
+    } catch (err) {
+        console.error('Failed to load AI config:', err);
+    }
+}
+
+function updateAiBadge(provider) {
+    const badge = document.getElementById('navAiProviderBadge');
+    if (badge) {
+        if (provider === 'Gemini') badge.innerText = 'AI: Gemini (Cloud)';
+        else if (provider === 'Groq') badge.innerText = 'AI: Groq (Cloud)';
+        else if (provider === 'Ollama') badge.innerText = 'AI: Ollama (Local)';
+        else if (provider === 'Offline') badge.innerText = 'AI: Offline (AST)';
+        else badge.innerText = `AI: ${provider}`;
+    }
+}
+
+async function saveAiConfig() {
+    const payload = {
+        provider: document.getElementById('cfgAiProvider').value,
+        geminiApiKey: document.getElementById('cfgGeminiKey').value.trim(),
+        geminiModel: document.getElementById('cfgGeminiModel').value.trim() || 'gemini-1.5-flash',
+        groqApiKey: document.getElementById('cfgGroqKey').value.trim(),
+        groqModel: document.getElementById('cfgGroqModel').value.trim() || 'llama-3.3-70b-versatile',
+        ollamaBaseUrl: document.getElementById('cfgOllamaUrl').value.trim() || 'http://localhost:11434',
+        model: document.getElementById('cfgOllamaModel').value.trim() || 'codellama',
+        enableAiEnhancement: document.getElementById('cfgEnableAi').checked,
+        fallbackToLocalGenerator: document.getElementById('cfgFallbackAst').checked,
+        timeoutSeconds: 30
+    };
+
+    try {
+        const response = await fetch('/Home/UpdateAiConfig', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (response.ok) {
+            updateAiBadge(payload.provider);
+            if (window.Swal) {
+                Swal.fire({
+                    icon: 'success',
+                    title: 'AI Settings Saved',
+                    text: `Active AI Engine set to ${payload.provider}.`,
+                    background: '#1e293b',
+                    color: '#f8fafc',
+                    confirmButtonColor: '#22c55e',
+                    timer: 2000,
+                    showConfirmButton: false
+                });
+            }
+            bootstrap.Modal.getInstance(document.getElementById('aiConfigModal')).hide();
+        }
+    } catch (err) {
+        if (window.Swal) {
+            Swal.fire({
+                icon: 'error',
+                title: 'Save Failed',
+                text: err.message,
+                background: '#1e293b',
+                color: '#f8fafc',
+                confirmButtonColor: '#ef4444'
+            });
+        }
+    }
+}
+
 // DOM Event Bindings
 document.addEventListener('DOMContentLoaded', () => {
     initMonaco();
+    loadAiConfig();
 
     // Monaco layout & diff / diagram triggers on output tab change
     const codeTabBtn = document.getElementById('tab-code-btn');

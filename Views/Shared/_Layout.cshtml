@@ -33,6 +33,11 @@
                 <div class="collapse navbar-collapse justify-content-end" id="navbarContent">
 
                     <div class="d-flex align-items-center gap-2">
+                        <!-- AI Engine Configuration Trigger Button -->
+                        <button type="button" class="btn btn-outline-success btn-sm d-flex align-items-center gap-1" data-bs-toggle="modal" data-bs-target="#aiConfigModal" onclick="loadAiConfig()">
+                            <i class="bi bi-robot"></i> <span id="navAiProviderBadge">AI: Gemini</span>
+                        </button>
+
                         <!-- Live DB Inspector Trigger Button -->
                         <button type="button" class="btn btn-outline-info btn-sm d-flex align-items-center gap-1" data-bs-toggle="modal" data-bs-target="#liveDbModal">
                             <i class="bi bi-hdd-network"></i> Connect Live DB
@@ -128,6 +133,120 @@
                     <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
                     <button type="button" class="btn btn-warning btn-sm" onclick="saveCorporateStandards()">
                         <i class="bi bi-check2-circle"></i> Save Policy
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal 3: AI Configuration & Cloud Providers -->
+    <div class="modal fade" id="aiConfigModal" tabindex="-1" aria-labelledby="aiConfigModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content bg-dark border-secondary shadow-lg">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title text-success" id="aiConfigModalLabel"><i class="bi bi-robot me-2"></i> AI Provider &amp; Cloud Settings</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-secondary small mb-3">
+                        Choose your preferred AI Engine. With Cloud AI (Google Gemini / Groq), you can generate SQL from Hindi, Hinglish, or English without running local Ollama models.
+                    </p>
+
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label text-light fw-bold" style="font-size: 0.85rem;">Active AI Engine</label>
+                            <select id="cfgAiProvider" class="form-select form-select-custom" onchange="toggleAiProviderFields()">
+                                <option value="Gemini">🌐 Google Gemini (Free Cloud AI)</option>
+                                <option value="Groq">⚡ Groq Cloud (Llama 3.3 70B)</option>
+                                <option value="Ollama">💻 Local Ollama (Offline LLM)</option>
+                                <option value="Offline">🛡️ Offline AST Only (No AI)</option>
+                            </select>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label text-light fw-bold" style="font-size: 0.85rem;">Enable AI Enhancement</label>
+                            <div class="form-check form-switch mt-2">
+                                <input class="form-check-input" type="checkbox" id="cfgEnableAi" checked>
+                                <label class="form-check-label text-secondary small" for="cfgEnableAi">Allow AI prompt generation &amp; tuning</label>
+                            </div>
+                        </div>
+
+                        <!-- Gemini Section -->
+                        <div class="col-12 ai-provider-section" id="sectionGemini">
+                            <div class="p-3 rounded border border-success-subtle bg-black bg-opacity-25">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <span class="text-success fw-bold"><i class="bi bi-google me-1"></i> Google Gemini Configuration</span>
+                                    <a href="https://aistudio.google.com/app/apikey" target="_blank" class="small text-info text-decoration-none">
+                                        <i class="bi bi-box-arrow-up-right"></i> Get Free Gemini API Key
+                                    </a>
+                                </div>
+                                <div class="row g-2">
+                                    <div class="col-md-8">
+                                        <label class="form-label text-secondary small">Gemini API Key</label>
+                                        <input type="password" class="form-control form-control-custom" id="cfgGeminiKey" placeholder="AIzaSy..." />
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label text-secondary small">Model</label>
+                                        <input type="text" class="form-control form-control-custom" id="cfgGeminiModel" value="gemini-1.5-flash" />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Groq Section -->
+                        <div class="col-12 ai-provider-section" id="sectionGroq" style="display:none;">
+                            <div class="p-3 rounded border border-warning-subtle bg-black bg-opacity-25">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <span class="text-warning fw-bold"><i class="bi bi-lightning-charge me-1"></i> Groq Cloud Configuration</span>
+                                    <a href="https://console.groq.com/keys" target="_blank" class="small text-info text-decoration-none">
+                                        <i class="bi bi-box-arrow-up-right"></i> Get Free Groq Key
+                                    </a>
+                                </div>
+                                <div class="row g-2">
+                                    <div class="col-md-8">
+                                        <label class="form-label text-secondary small">Groq API Key</label>
+                                        <input type="password" class="form-control form-control-custom" id="cfgGroqKey" placeholder="gsk_..." />
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label text-secondary small">Model</label>
+                                        <input type="text" class="form-control form-control-custom" id="cfgGroqModel" value="llama-3.3-70b-versatile" />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Ollama Section -->
+                        <div class="col-12 ai-provider-section" id="sectionOllama" style="display:none;">
+                            <div class="p-3 rounded border border-info-subtle bg-black bg-opacity-25">
+                                <span class="text-info fw-bold mb-2 d-block"><i class="bi bi-hdd-rack me-1"></i> Local Ollama Configuration</span>
+                                <div class="row g-2">
+                                    <div class="col-md-8">
+                                        <label class="form-label text-secondary small">Ollama Base URL</label>
+                                        <input type="text" class="form-control form-control-custom" id="cfgOllamaUrl" value="http://localhost:11434" />
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label text-secondary small">Local Model Name</label>
+                                        <input type="text" class="form-control form-control-custom" id="cfgOllamaModel" value="codellama" />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Fallback Setting -->
+                        <div class="col-12">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="cfgFallbackAst" checked>
+                                <label class="form-check-label text-light small" for="cfgFallbackAst">
+                                    Automatic Fallback (Try secondary cloud providers &amp; offline AST if API is unavailable)
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-success btn-sm" onclick="saveAiConfig()">
+                        <i class="bi bi-check2-circle"></i> Save AI Settings
                     </button>
                 </div>
             </div>

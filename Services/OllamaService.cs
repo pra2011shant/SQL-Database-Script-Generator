@@ -1,6 +1,5 @@
 using System.IO;
 using System.Text;
-using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using SQLDatabaseScriptGenerator.Models;
 
@@ -9,21 +8,16 @@ namespace SQLDatabaseScriptGenerator.Services;
 public class OllamaService : IOllamaService
 {
     private readonly HttpClient _httpClient;
-    private readonly AiSettings _aiSettings;
+    private readonly IAiConfigurationService _configService;
     private readonly ILogger<OllamaService> _logger;
 
-    public OllamaService(HttpClient httpClient, IOptions<AiSettings> aiSettings, ILogger<OllamaService> logger)
+    public string ProviderName => "Ollama";
+
+    public OllamaService(HttpClient httpClient, IAiConfigurationService configService, ILogger<OllamaService> logger)
     {
         _httpClient = httpClient;
-        _aiSettings = aiSettings.Value;
+        _configService = configService;
         _logger = logger;
-
-        var baseUrl = string.IsNullOrWhiteSpace(_aiSettings.OllamaBaseUrl) 
-            ? "http://localhost:11434" 
-            : _aiSettings.OllamaBaseUrl.TrimEnd('/');
-
-        _httpClient.BaseAddress = new Uri(baseUrl + "/");
-        _httpClient.Timeout = TimeSpan.FromSeconds(_aiSettings.TimeoutSeconds > 0 ? _aiSettings.TimeoutSeconds : 30);
     }
 
     /// <summary>
@@ -33,10 +27,12 @@ public class OllamaService : IOllamaService
     {
         try
         {
+            var settings = _configService.GetSettings();
+            var baseUrl = string.IsNullOrWhiteSpace(settings.OllamaBaseUrl) ? "http://localhost:11434" : settings.OllamaBaseUrl.TrimEnd('/');
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(TimeSpan.FromSeconds(2)); // Rapid heartbeat check
 
-            using var response = await _httpClient.GetAsync("api/tags", cts.Token);
+            using var response = await _httpClient.GetAsync($"{baseUrl}/api/tags", cts.Token);
             return response.IsSuccessStatusCode;
         }
         catch (Exception ex)
@@ -51,17 +47,20 @@ public class OllamaService : IOllamaService
     /// </summary>
     public async Task<string?> GenerateSqlCompletionAsync(string prompt, string systemPrompt, CancellationToken cancellationToken = default)
     {
-        if (!_aiSettings.EnableAiEnhancement)
+        var settings = _configService.GetSettings();
+        if (!settings.EnableAiEnhancement)
         {
             _logger.LogInformation("AI enhancement is disabled in configuration. Skipping Ollama dispatch.");
             return null;
         }
 
+        var baseUrl = string.IsNullOrWhiteSpace(settings.OllamaBaseUrl) ? "http://localhost:11434" : settings.OllamaBaseUrl.TrimEnd('/');
+
         try
         {
             var payload = new
             {
-                model = !string.IsNullOrWhiteSpace(_aiSettings.Model) ? _aiSettings.Model : "codellama",
+                model = !string.IsNullOrWhiteSpace(settings.Model) ? settings.Model : "codellama",
                 prompt = prompt,
                 system = systemPrompt,
                 stream = false,
@@ -76,10 +75,10 @@ public class OllamaService : IOllamaService
             var json = JsonConvert.SerializeObject(payload);
             using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            _logger.LogInformation("Sending SQL generation prompt to Ollama ({Model}) at {BaseUrl}api/generate",
-                payload.model, _httpClient.BaseAddress);
+            _logger.LogInformation("Sending SQL generation prompt to Ollama ({Model}) at {BaseUrl}/api/generate",
+                payload.model, baseUrl);
 
-            using var response = await _httpClient.PostAsync("api/generate", content, cancellationToken);
+            using var response = await _httpClient.PostAsync($"{baseUrl}/api/generate", content, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("Ollama responded with non-success HTTP status code: {StatusCode}", response.StatusCode);
@@ -99,13 +98,13 @@ public class OllamaService : IOllamaService
         catch (HttpRequestException ex)
         {
             _logger.LogInformation("Ollama local service is offline or unreachable at {BaseUrl} ({Message}). Fallback engine activated.",
-                _httpClient.BaseAddress, ex.Message);
+                baseUrl, ex.Message);
             return null;
         }
         catch (TaskCanceledException ex)
         {
             _logger.LogWarning("Ollama request timed out after {Timeout}s ({Message}). Fallback engine activated.",
-                _aiSettings.TimeoutSeconds, ex.Message);
+                settings.TimeoutSeconds, ex.Message);
             return null;
         }
         catch (Exception ex)

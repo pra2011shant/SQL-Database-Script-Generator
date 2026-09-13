@@ -12,24 +12,46 @@ public class HomeController : Controller
     private readonly ISqlTemplateService _sqlTemplateService;
     private readonly ISqlStandardsService _standardsService;
     private readonly ILiveDatabaseInspectorService _liveInspectorService;
+    private readonly IAiConfigurationService _aiConfigService;
 
     public HomeController(
         ILogger<HomeController> logger,
         ISqlEngineService sqlEngineService,
         ISqlTemplateService sqlTemplateService,
         ISqlStandardsService standardsService,
-        ILiveDatabaseInspectorService liveInspectorService)
+        ILiveDatabaseInspectorService liveInspectorService,
+        IAiConfigurationService aiConfigService)
     {
         _logger = logger;
         _sqlEngineService = sqlEngineService;
         _sqlTemplateService = sqlTemplateService;
         _standardsService = standardsService;
         _liveInspectorService = liveInspectorService;
+        _aiConfigService = aiConfigService;
     }
 
     public IActionResult Index()
     {
         return View();
+    }
+
+    [HttpGet]
+    public IActionResult GetAiConfig()
+    {
+        var config = _aiConfigService.GetSettings();
+        // Mask API keys for safe display if desired, or return direct for management
+        return Json(config);
+    }
+
+    [HttpPost]
+    [IgnoreAntiforgeryToken]
+    public IActionResult UpdateAiConfig([FromBody] AiSettings config)
+    {
+        if (config == null)
+            return BadRequest(new { Message = "Invalid AI configuration payload." });
+
+        _aiConfigService.UpdateSettings(config);
+        return Ok(new { Message = "AI configuration updated successfully.", ActiveProvider = config.Provider });
     }
 
     [HttpGet]

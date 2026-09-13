@@ -9,8 +9,12 @@ builder.Services.Configure<AiSettings>(builder.Configuration.GetSection(AiSettin
 // Add services to the container.
 builder.Services.AddControllersWithViews();
 
-// Register HTTP Client for Ollama / LLM provider
+// Register AI Configuration and HTTP Clients
+builder.Services.AddSingleton<IAiConfigurationService, AiConfigurationService>();
 builder.Services.AddHttpClient<IOllamaService, OllamaService>();
+builder.Services.AddHttpClient<GeminiService>();
+builder.Services.AddHttpClient<GroqService>();
+builder.Services.AddScoped<IAiCompletionService, AiOrchestratorService>();
 
 // Register Domain & Core Engine Services
 builder.Services.AddScoped<ISqlParserService, SqlParserService>();

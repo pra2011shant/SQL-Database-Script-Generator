@@ -12,7 +12,7 @@ namespace SQLDatabaseScriptGenerator.Services;
 public class SqlEngineService : ISqlEngineService
 {
     private readonly ISqlParserService _sqlParserService;
-    private readonly IOllamaService _ollamaService;
+    private readonly IAiCompletionService _aiService;
     private readonly ISqlStandardsService _standardsService;
     private readonly ISqlTranspilerService _transpilerService;
     private readonly ISchemaVisualizerService _schemaVisualizerService;
@@ -20,14 +20,14 @@ public class SqlEngineService : ISqlEngineService
 
     public SqlEngineService(
         ISqlParserService sqlParserService,
-        IOllamaService ollamaService,
+        IAiCompletionService aiService,
         ISqlStandardsService standardsService,
         ISqlTranspilerService transpilerService,
         ISchemaVisualizerService schemaVisualizerService,
         ILogger<SqlEngineService> logger)
     {
         _sqlParserService = sqlParserService;
-        _ollamaService = ollamaService;
+        _aiService = aiService;
         _standardsService = standardsService;
         _transpilerService = transpilerService;
         _schemaVisualizerService = schemaVisualizerService;
@@ -163,7 +163,7 @@ public class SqlEngineService : ISqlEngineService
 
         string userPrompt = $"Generate a complete, production-grade T-SQL CREATE TABLE schema adhering to the following specifications:\n\nUser Input / Natural Language Prompt: {req.SqlInput}\nAdditional Requirements & Directives: {requirement}";
 
-        var aiResult = await _ollamaService.GenerateSqlCompletionAsync(userPrompt, systemPrompt, ct);
+        var aiResult = await _aiService.GenerateSqlCompletionAsync(userPrompt, systemPrompt, ct);
         if (!string.IsNullOrWhiteSpace(aiResult))
         {
             response.ResultSql = CleanAiOutput(aiResult);
@@ -265,7 +265,7 @@ public class SqlEngineService : ISqlEngineService
 
         string userPrompt = $"Generate production-grade stored procedures for table [{tableName}] adhering to the following schema or natural language request:\n\nInput / Schema: {req.SqlInput}\n\nRequirements & Instructions: {requirement}";
 
-        var aiResult = await _ollamaService.GenerateSqlCompletionAsync(userPrompt, systemPrompt, ct);
+        var aiResult = await _aiService.GenerateSqlCompletionAsync(userPrompt, systemPrompt, ct);
         if (!string.IsNullOrWhiteSpace(aiResult))
         {
             response.ResultSql = CleanAiOutput(aiResult);
@@ -487,7 +487,7 @@ public class SqlEngineService : ISqlEngineService
         string userPrompt = $"Diagnose and fix this flawed SQL script or natural language query request:\n```sql\n{req.SqlInput}\n```\n\n" +
             $"ScriptDom Diagnostics:\n{response.Diagnosis}\n\nRequirements: {requirement}";
 
-        var aiResult = await _ollamaService.GenerateSqlCompletionAsync(userPrompt, systemPrompt, ct);
+        var aiResult = await _aiService.GenerateSqlCompletionAsync(userPrompt, systemPrompt, ct);
         if (!string.IsNullOrWhiteSpace(aiResult))
         {
             response.ResultSql = CleanAiOutput(aiResult);
@@ -542,7 +542,7 @@ public class SqlEngineService : ISqlEngineService
 
         string userPrompt = $"Optimize the following query or requirements:\n\n{req.SqlInput}\n\nRequirements & Context: {requirement}";
 
-        var aiResult = await _ollamaService.GenerateSqlCompletionAsync(userPrompt, systemPrompt, ct);
+        var aiResult = await _aiService.GenerateSqlCompletionAsync(userPrompt, systemPrompt, ct);
         if (!string.IsNullOrWhiteSpace(aiResult))
         {
             response.ResultSql = CleanAiOutput(aiResult);
