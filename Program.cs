@@ -9,12 +9,9 @@ builder.Services.Configure<AiSettings>(builder.Configuration.GetSection(AiSettin
 // Add services to the container.
 builder.Services.AddControllersWithViews();
 
-// Register AI Configuration and HTTP Clients
+// Register AI Configuration and Groq Cloud Client
 builder.Services.AddSingleton<IAiConfigurationService, AiConfigurationService>();
-builder.Services.AddHttpClient<IOllamaService, OllamaService>();
-builder.Services.AddHttpClient<GeminiService>();
-builder.Services.AddHttpClient<GroqService>();
-builder.Services.AddScoped<IAiCompletionService, AiOrchestratorService>();
+builder.Services.AddHttpClient<IAiCompletionService, GroqService>();
 
 // Register Domain & Core Engine Services
 builder.Services.AddScoped<ISqlParserService, SqlParserService>();

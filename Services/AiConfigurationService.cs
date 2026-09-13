@@ -26,12 +26,8 @@ public class AiConfigurationService : IAiConfigurationService
             return new AiSettings
             {
                 Provider = _settings.Provider,
-                GeminiApiKey = _settings.GeminiApiKey,
-                GeminiModel = _settings.GeminiModel,
                 GroqApiKey = _settings.GroqApiKey,
                 GroqModel = _settings.GroqModel,
-                OllamaBaseUrl = _settings.OllamaBaseUrl,
-                Model = _settings.Model,
                 TimeoutSeconds = _settings.TimeoutSeconds,
                 EnableAiEnhancement = _settings.EnableAiEnhancement,
                 FallbackToLocalGenerator = _settings.FallbackToLocalGenerator
@@ -45,12 +41,8 @@ public class AiConfigurationService : IAiConfigurationService
         lock (_lock)
         {
             if (!string.IsNullOrWhiteSpace(newSettings.Provider)) _settings.Provider = newSettings.Provider;
-            if (newSettings.GeminiApiKey != null) _settings.GeminiApiKey = newSettings.GeminiApiKey;
-            if (!string.IsNullOrWhiteSpace(newSettings.GeminiModel)) _settings.GeminiModel = newSettings.GeminiModel;
             if (newSettings.GroqApiKey != null) _settings.GroqApiKey = newSettings.GroqApiKey;
             if (!string.IsNullOrWhiteSpace(newSettings.GroqModel)) _settings.GroqModel = newSettings.GroqModel;
-            if (!string.IsNullOrWhiteSpace(newSettings.OllamaBaseUrl)) _settings.OllamaBaseUrl = newSettings.OllamaBaseUrl;
-            if (!string.IsNullOrWhiteSpace(newSettings.Model)) _settings.Model = newSettings.Model;
             _settings.TimeoutSeconds = newSettings.TimeoutSeconds;
             _settings.EnableAiEnhancement = newSettings.EnableAiEnhancement;
             _settings.FallbackToLocalGenerator = newSettings.FallbackToLocalGenerator;
