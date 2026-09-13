@@ -34,6 +34,14 @@ public class SqlEngineService : ISqlEngineService
         _logger = logger;
     }
 
+    private const string MultilingualAiDirective = 
+        "MULTILINGUAL & NATURAL LANGUAGE UNDERSTANDING DIRECTIVE:\n" +
+        "- You fully understand user prompts and domain specifications written in ANY language: Hindi (Devanagari script: e.g., 'छात्रों के लिए तालिका बनाएं'), Hinglish / Roman Hindi (e.g., 'ek student table banao jisme roll number, student name aur father name ho'), English, Spanish, etc.\n" +
+        "- Accurately interpret user domain entities, table requirements, and field names even from conversational or colloquial phrasing.\n" +
+        "- Map non-English or colloquial field names to clean, industry-standard English PascalCase column names (e.g., 'naam' -> 'StudentName' / 'Name', 'pata' -> 'Address', 'vetan'/'tankhwah' -> 'Salary', 'pitha ka naam' -> 'FatherName', 'mata ka naam' -> 'MotherName', 'janam din'/'janmtithi' -> 'DateOfBirth', 'shahar' -> 'City', 'chhatra id' -> 'StudentID', 'anukramank'/'roll no' -> 'RollNumber').\n" +
+        "- Infer appropriate modern SQL Server data types (e.g., INT IDENTITY, NVARCHAR(150), DECIMAL(18,2), DATETIME2(7), BIT).\n" +
+        "- Always output 100% executable Microsoft SQL Server (T-SQL) code.\n";
+
     public SqlValidationResult ValidateSql(string sql) => _sqlParserService.ValidateAndParse(sql);
 
     public string FormatSql(string sql) => _sqlParserService.FormatSql(sql);
@@ -147,18 +155,19 @@ public class SqlEngineService : ISqlEngineService
         var tableName = meta.TableName;
         response.Diagnosis = $"Designing enterprise DDL table schema for [{tableName}] with PK, FK, constraints, and audit columns.";
 
-        string systemPrompt = "You are a Principal Microsoft SQL Server Database Architect. " +
-            "Generate production-grade T-SQL CREATE TABLE scripts with explicit PRIMARY KEY, FOREIGN KEY constraints, CHECK constraints, DEFAULT constraints, and standard Audit columns. " +
+        string systemPrompt = "You are a Principal Microsoft SQL Server Database Architect.\n" +
+            MultilingualAiDirective + "\n" +
+            "Generate production-grade T-SQL CREATE TABLE scripts with explicit PRIMARY KEY, FOREIGN KEY constraints, CHECK constraints, DEFAULT constraints, and standard Audit columns.\n" +
             $"{_standardsService.BuildStandardsContextPrompt()}\n" +
             "Prefix key design choices with '-- BEST PRACTICE:' comment markers. Return ONLY executable T-SQL.";
 
-        string userPrompt = $"Generate a complete, production-grade T-SQL CREATE TABLE schema adhering to the following requirements and specifications:\n\nUser Prompt / Requirements: {req.SqlInput}\nAdditional Directives: {requirement}";
+        string userPrompt = $"Generate a complete, production-grade T-SQL CREATE TABLE schema adhering to the following specifications:\n\nUser Input / Natural Language Prompt: {req.SqlInput}\nAdditional Requirements & Directives: {requirement}";
 
         var aiResult = await _ollamaService.GenerateSqlCompletionAsync(userPrompt, systemPrompt, ct);
         if (!string.IsNullOrWhiteSpace(aiResult))
         {
             response.ResultSql = CleanAiOutput(aiResult);
-            response.Explanation = $"Generated production-grade CREATE TABLE DDL using AI based on your domain requirements with constraints and audit tracking.";
+            response.Explanation = $"Generated production-grade CREATE TABLE DDL using AI based on your natural language requirements with constraints and audit tracking.";
             response.Recommendations.Add("Always define explicit constraint names (e.g. PK_..., FK_..., DF_..., CK_...) instead of system-generated names.");
             response.Recommendations.Add("Use DATETIME2(7) instead of legacy DATETIME for higher precision and standard storage.");
             return;
@@ -248,12 +257,13 @@ public class SqlEngineService : ISqlEngineService
         var pkCol = meta.PrimaryKeyColumn;
         response.Diagnosis = $"Analyzed input schema for [{tableName}]. Generating modular CRUD procedures with error handling.";
 
-        string systemPrompt = "You are a Principal Database Architect. " +
-            "Generate production-grade T-SQL stored procedures with TRY/CATCH error handling, explicit transaction scopes, and pagination. " +
+        string systemPrompt = "You are a Principal Database Architect.\n" +
+            MultilingualAiDirective + "\n" +
+            "Generate production-grade T-SQL stored procedures (CRUD: Insert/Update Upsert, Delete, GetByID, Search with Pagination) with TRY/CATCH error handling, explicit transaction scopes, and pagination.\n" +
             $"{_standardsService.BuildStandardsContextPrompt()}\n" +
             "Prefix key design choices with '-- BEST PRACTICE:' comment markers. Return executable T-SQL.";
 
-        string userPrompt = $"Generate stored procedures for table [{tableName}] from schema:\n\n{req.SqlInput}\n\nRequirements: {requirement}";
+        string userPrompt = $"Generate production-grade stored procedures for table [{tableName}] adhering to the following schema or natural language request:\n\nInput / Schema: {req.SqlInput}\n\nRequirements & Instructions: {requirement}";
 
         var aiResult = await _ollamaService.GenerateSqlCompletionAsync(userPrompt, systemPrompt, ct);
         if (!string.IsNullOrWhiteSpace(aiResult))
@@ -468,12 +478,13 @@ public class SqlEngineService : ISqlEngineService
             response.Diagnosis = "No syntax errors detected by ScriptDom AST parser. Validating logical/anti-pattern constructs.";
         }
 
-        string systemPrompt = "You are an expert T-SQL Debugger and Syntax Repair Specialist. " +
-            "Diagnose all syntax, semantic, and structural errors. " +
-            "Rewrite the script with clear inline comment markers starting with '-- FIX:' before every corrected line. " +
+        string systemPrompt = "You are an expert T-SQL Debugger and Syntax Repair Specialist.\n" +
+            MultilingualAiDirective + "\n" +
+            "Diagnose all syntax, semantic, and structural errors from user queries or descriptions.\n" +
+            "Rewrite the script with clear inline comment markers starting with '-- FIX:' before every corrected line.\n" +
             "Return executable T-SQL code.";
 
-        string userPrompt = $"Diagnose and fix this flawed SQL script:\n```sql\n{req.SqlInput}\n```\n\n" +
+        string userPrompt = $"Diagnose and fix this flawed SQL script or natural language query request:\n```sql\n{req.SqlInput}\n```\n\n" +
             $"ScriptDom Diagnostics:\n{response.Diagnosis}\n\nRequirements: {requirement}";
 
         var aiResult = await _ollamaService.GenerateSqlCompletionAsync(userPrompt, systemPrompt, ct);
@@ -524,11 +535,12 @@ public class SqlEngineService : ISqlEngineService
     {
         response.Diagnosis = "Query contains potential performance anti-patterns (e.g. non-SARGable predicates, subqueries in WHERE clause, missing covering indexes).";
 
-        string systemPrompt = "You are a Microsoft SQL Server Performance Tuning Specialist. " +
-            "Rewrite unoptimized queries into high-performance T-SQL using Common Table Expressions (CTEs), Window Functions, and SARGable range predicates. " +
+        string systemPrompt = "You are a Microsoft SQL Server Performance Tuning Specialist.\n" +
+            MultilingualAiDirective + "\n" +
+            "Rewrite unoptimized queries into high-performance T-SQL using Common Table Expressions (CTEs), Window Functions, and SARGable range predicates based on user requirements in any language.\n" +
             "Prefix every major optimization with an inline comment marker '-- OPTIMIZATION:'. Return executable T-SQL.";
 
-        string userPrompt = $"Optimize the following query:\n\n{req.SqlInput}\n\nRequirements: {requirement}";
+        string userPrompt = $"Optimize the following query or requirements:\n\n{req.SqlInput}\n\nRequirements & Context: {requirement}";
 
         var aiResult = await _ollamaService.GenerateSqlCompletionAsync(userPrompt, systemPrompt, ct);
         if (!string.IsNullOrWhiteSpace(aiResult))

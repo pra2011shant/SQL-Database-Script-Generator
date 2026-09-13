@@ -32,16 +32,17 @@ public class SqlParserService : ISqlParserService
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private static readonly Regex NaturalLanguageTableNameRegex = new(
-        @"\b(?:table\s+name\s+is|table\s*name\s*[:=]|table\s+named|table\s+called|create\s+(?:a\s+)?table\s+named|create\s+(?:a\s+)?table\s+name\s+is|create\s+(?:a\s+)?table)\s+\[?([a-zA-Z0-9_]+)\]?",
+        @"\b(?:table\s+(?:name\s+is|name\s*[:=]|named|called|banao|ka\s+naam|ki\s+naam|chahiye)|create\s+(?:a\s+)?table\s+(?:named|name\s+is|banao)?|create\s+(?:a\s+)?table|तालिका\s+(?:बनाएं|का\s+नाम|की)?)\s+\[?([a-zA-Z0-9_\u0900-\u097F]+)\]?",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private static readonly Regex NaturalLanguageColumnsRegex = new(
-        @"\b(?:column[s]?\s*nme|column[s]?\s*name[s]?|column[s]?|fields|attributes)\s*(?:are|is|[:=])\s*([a-zA-Z0-9_,\s]+?)(?:\s+(?:and\s+plea|and\s+with|please|pleaase|where|having|for\s+this)|$)",
+        @"\b(?:column[s]?\s*(?:nme|name[s]?|banao|chahiye)?|fields|attributes|jisme\s+column[s]?|jisme\s+field[s]?|jisme|स्तंभ|कॉलम)\s*(?:are|is|[:=]|hoge|honge|rakho|me)?\s*([a-zA-Z0-9_\u0900-\u097F,\s]+?)(?:\s+(?:and\s+plea|and\s+with|please|pleaase|where|having|for\s+this|ho|chahiye|hoga|karein|banaen)|$)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private static readonly HashSet<string> ReservedWordsFilter = new(StringComparer.OrdinalIgnoreCase)
     {
-        "a", "an", "the", "table", "column", "columns", "name", "nme", "and", "or", "with", "please", "pleaase", "is", "are", "this"
+        "a", "an", "the", "table", "column", "columns", "name", "nme", "and", "or", "with", "please", "pleaase", "is", "are", "this",
+        "ka", "ki", "ke", "ko", "se", "me", "mein", "ek", "aur", "banao", "chahiye", "karo", "karein", "ho", "hoge", "honge", "jisme"
     };
 
     public SqlValidationResult ValidateAndParse(string sqlScript)
@@ -234,21 +235,23 @@ public class SqlParserService : ISqlParserService
                     if (string.IsNullOrWhiteSpace(cleanCol) || ReservedWordsFilter.Contains(cleanCol))
                         continue;
 
-                    bool isPk = !pkAssigned && (cleanCol.Equals("id", StringComparison.OrdinalIgnoreCase) || 
-                                                cleanCol.EndsWith("id", StringComparison.OrdinalIgnoreCase) || 
-                                                cleanCol.Equals($"{meta.TableName}ID", StringComparison.OrdinalIgnoreCase));
+                    var normalizedName = NormalizeColumnName(cleanCol);
 
-                    var inferredType = InferDataType(cleanCol);
+                    bool isPk = !pkAssigned && (normalizedName.Equals("id", StringComparison.OrdinalIgnoreCase) || 
+                                                normalizedName.EndsWith("id", StringComparison.OrdinalIgnoreCase) || 
+                                                normalizedName.Equals($"{meta.TableName}ID", StringComparison.OrdinalIgnoreCase));
+
+                    var inferredType = InferDataType(normalizedName);
 
                     if (isPk)
                     {
                         pkAssigned = true;
-                        meta.PrimaryKeyColumn = cleanCol;
+                        meta.PrimaryKeyColumn = normalizedName;
                     }
 
                     meta.Columns.Add(new ColumnMetadata
                     {
-                        Name = cleanCol,
+                        Name = normalizedName,
                         DataType = inferredType,
                         IsPrimaryKey = isPk,
                         IsIdentity = isPk,
@@ -280,6 +283,25 @@ public class SqlParserService : ISqlParserService
         return meta;
     }
 
+    private static string NormalizeColumnName(string raw)
+    {
+        var lower = raw.ToLowerInvariant();
+        if (lower == "naam" || lower == "नाम") return "Name";
+        if (lower == "pata" || lower == "पता") return "Address";
+        if (lower == "pitha" || lower == "pita" || lower == "पिता" || lower == "father") return "FatherName";
+        if (lower == "mata" || lower == "माता" || lower == "mother") return "MotherName";
+        if (lower == "vetan" || lower == "tankhwah" || lower == "वेतन") return "Salary";
+        if (lower == "shahar" || lower == "शहर") return "City";
+        if (lower == "rajya" || lower == "राज्य") return "State";
+        if (lower == "desh" || lower == "देश") return "Country";
+        if (lower == "janamdin" || lower == "janmtithi" || lower == "जन्म") return "DateOfBirth";
+        if (lower == "umra" || lower == "aayu" || lower == "आयु") return "Age";
+        if (lower == "durwash" || lower == "phone" || lower == "mobile" || lower == "फोन") return "PhoneNumber";
+        if (lower == "anukramank" || lower == "kramank" || lower == "rollno" || lower == "roll") return "RollNumber";
+        if (lower == "chhatra" || lower == "student") return "StudentName";
+        return raw;
+    }
+
     private static string InferDataType(string colName)
     {
         var lower = colName.ToLowerInvariant();
@@ -289,6 +311,7 @@ public class SqlParserService : ISqlParserService
         if (lower.Contains("num") || lower.Contains("phone") || lower.Contains("mobile") || lower.Contains("roll") || lower.Contains("code") || lower.Contains("zip") || lower.Contains("pin") || lower.Contains("contact")) return "NVARCHAR(50)";
         if (lower.Contains("date") || lower.Contains("dob") || lower.Contains("time")) return "DATETIME2(7)";
         if (lower.Contains("amount") || lower.Contains("price") || lower.Contains("salary") || lower.Contains("fee") || lower.Contains("total") || lower.Contains("cost")) return "DECIMAL(18,2)";
+        if (lower.Contains("age") || lower.Contains("count") || lower.Contains("qty") || lower.Contains("quantity") || lower.Contains("year")) return "INT";
         if (lower.Contains("isactive") || lower.Contains("isdeleted") || lower.Contains("flag") || lower.StartsWith("is") || lower.StartsWith("has")) return "BIT";
         if (lower.Contains("status") || lower.Contains("type") || lower.Contains("gender")) return "VARCHAR(30)";
         return "NVARCHAR(100)";
