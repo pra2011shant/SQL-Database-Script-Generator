@@ -16,9 +16,10 @@ An enterprise-grade, high-performance ASP.NET Core MVC application built with **
 - Detects exact syntax errors with line and column precision before execution.
 - Generates clean, standardized, beautified T-SQL with configurable keyword casing and indentation.
 
-### 2. ⚡ AI-Powered Optimization & Deterministic Fallback
-- Local LLM integration via **Ollama** (`codellama`, `llama3`, `deepseek-coder`).
-- **100% Offline Fallback Mechanism**: If Ollama or internet is unreachable, the system automatically uses deterministic ScriptDom AST rules to optimize, fix errors, and generate stored procedures without interruption.
+### 2. ⚡ Groq Cloud AI (Llama 3.3 70B) & Deterministic Fallback
+- Lightning-fast cloud AI generation via **Groq LPU** running **`llama-3.3-70b-versatile`**.
+- Native **multilingual support**: understands prompts in Hindi, Hinglish, Roman Hindi, English, and converts conversational requests directly into production-grade T-SQL.
+- **100% Offline Fallback Mechanism**: If no API key is provided or the connection is offline, the system automatically uses deterministic ScriptDom AST rules to optimize, fix errors, and generate stored procedures without interruption.
 
 ### 3. ⚖️ Monaco Side-by-Side Diff Viewer
 - Integrated `monaco.editor.createDiffEditor` providing side-by-side visual diffing between input queries and generated/optimized SQL.
@@ -61,6 +62,7 @@ SQLDatabaseScriptGenerator/
 │   └── HomeController.cs               # Central API & MVC controller for processing requests
 │
 ├── Models/
+│   ├── AiSettings.cs                   # Groq AI settings model
 │   ├── CorporateSqlStandards.cs        # Corporate SQL policy and standards model
 │   ├── LiveDbInspectRequest.cs         # Connection and inspection request models
 │   ├── ScriptRequestModel.cs           # User payload for SQL actions and generator modes
@@ -70,10 +72,11 @@ SQLDatabaseScriptGenerator/
 │   └── TableMetadata.cs                # Dynamic table columns, PKs, and data types
 │
 ├── Services/
+│   ├── AiConfigurationService.cs       # Thread-safe Groq settings manager
+│   ├── GroqService.cs                  # Groq Cloud API HTTP client (Llama 3.3 70B)
+│   ├── IAiCompletionService.cs         # AI completion contract
 │   ├── ILiveDatabaseInspectorService.cs# Live SQL Server read-only inspection contract
 │   ├── LiveDatabaseInspectorService.cs # Live database schema reader implementation
-│   ├── IOllamaService.cs               # AI LLM integration contract
-│   ├── OllamaService.cs                # Ollama HTTP API client implementation
 │   ├── ISchemaVisualizerService.cs     # Mermaid ER diagram generation contract
 │   ├── SchemaVisualizerService.cs      # Mermaid.js ER diagram builder
 │   ├── ISqlEngineService.cs            # Master orchestrator for analysis and generation
@@ -89,8 +92,8 @@ SQLDatabaseScriptGenerator/
 │   ├── Home/
 │   │   └── Index.cshtml                # Main interactive dashboard with Monaco editor and tabs
 │   └── Shared/
-│       ├── _Layout.cshtml              # Master layout with modals (Live DB, Corporate Policy)
-│       └── _ValidationScriptsPartial.cshtml
+│       ├── _Layout.cshtml              # Master layout with modals (Live DB, Corporate Policy, Groq)
+│       └── Error.cshtml                # Friendly error view
 │
 ├── wwwroot/
 │   ├── css/
@@ -98,7 +101,7 @@ SQLDatabaseScriptGenerator/
 │   └── js/
 │       └── sql-generator.js            # Non-blocking client-side orchestration, Monaco & Mermaid
 │
-├── appsettings.json                    # Configuration (Ollama URL, Model, Defaults)
+├── appsettings.json                    # Configuration (Groq Cloud defaults)
 ├── Program.cs                          # Application bootstrapping & Dependency Injection
 └── SQLDatabaseScriptGenerator.csproj   # Project dependencies and targets
 ```
@@ -111,6 +114,7 @@ SQLDatabaseScriptGenerator/
 | :--- | :--- | :--- |
 | **.NET** | `8.0 (LTS)` | High-performance C# runtime |
 | **ASP.NET Core MVC** | `8.0` | Clean web architecture |
+| **Groq Cloud API** | `llama-3.3-70b` | Ultra-fast natural language to SQL AI inference |
 | **Microsoft.SqlServer.TransactSql.ScriptDom** | `180.107.0` | AST parsing, validation, and deterministic T-SQL generation |
 | **Microsoft.Data.SqlClient** | `7.0.3` | Safe read-only live SQL Server schema inspection |
 | **Newtonsoft.Json** | `13.0.4` | JSON payload serialization |
@@ -124,8 +128,8 @@ SQLDatabaseScriptGenerator/
 
 ### Prerequisites
 - [.NET 8.0 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
-- [Visual Studio 2022 (v17.8+)](https://visualstudio.microsoft.com/) or [Visual Studio Code](https://code.visualstudio.com/) with C# Dev Kit
-- *(Optional)* [Ollama](https://ollama.com/) for local offline AI assistance
+- [Visual Studio 2022 (v17.8+)](https://visualstudio.microsoft.com/) or [Visual Studio Code](https://code.visualstudio.com/)
+- *(Optional)* Free Groq API Key from [console.groq.com/keys](https://console.groq.com/keys)
 
 ### Installation & Run
 
@@ -153,18 +157,14 @@ SQLDatabaseScriptGenerator/
 
 ---
 
-## 🤖 Ollama AI Setup (Optional)
+## ⚡ Groq Cloud AI Setup (Optional)
 
-To enable local AI-powered SQL optimization and explanation:
-1. Download and install [Ollama](https://ollama.com/).
-2. Pull your preferred coding model:
-   ```bash
-   ollama run codellama
-   # or
-   ollama run llama3
-   ```
-3. Ensure Ollama service is running on `http://localhost:11434`.
-4. The application will automatically detect Ollama and fall back gracefully to AST generation if it is offline.
+To enable AI-powered SQL generation and multilingual parsing:
+1. Get a free API key from [Groq Console](https://console.groq.com/keys).
+2. Click the **AI: Groq** button in the top navigation bar of the application.
+3. Paste your Groq API key and click **Save Groq Key**.
+4. You can now write prompts in Hindi, Hinglish, or English.
+5. If no API key is provided, the application automatically uses deterministic AST offline generation.
 
 ---
 

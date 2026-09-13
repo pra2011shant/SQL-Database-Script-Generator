@@ -1,7 +1,7 @@
 namespace SQLDatabaseScriptGenerator.Services;
 
 /// <summary>
-/// Unified contract for AI completion providers (Gemini, Groq, Ollama).
+/// Dedicated contract for AI completion providers (Groq Cloud Llama-3.3-70B).
 /// </summary>
 public interface IAiCompletionService
 {
