@@ -44,7 +44,8 @@ public class SqlEngineService : ISqlEngineService
 
         // 1. Non-blocking AST validation and schema extraction
         var validation = await Task.Run(() => _sqlParserService.ValidateAndParse(request.SqlInput), cancellationToken);
-        var tableMeta = await Task.Run(() => _sqlParserService.ExtractTableMetadata(request.SqlInput), cancellationToken);
+        var combinedText = string.IsNullOrWhiteSpace(request.Requirement) ? request.SqlInput : $"{request.SqlInput} {request.Requirement}";
+        var tableMeta = await Task.Run(() => _sqlParserService.ExtractTableMetadata(combinedText), cancellationToken);
 
         var response = new ScriptResponseModel
         {
@@ -116,8 +117,11 @@ public class SqlEngineService : ISqlEngineService
                 break;
         }
 
-        // Generate Visual ER Diagram (Mermaid.js)
-        response.MermaidErDiagram = _schemaVisualizerService.GenerateMermaidErDiagram(request.SqlInput);
+        // Generate Visual ER Diagram (Mermaid.js) from generated DDL or input DDL
+        var erSourceSql = !string.IsNullOrWhiteSpace(response.ResultSql) && response.ResultSql.Contains("CREATE TABLE", StringComparison.OrdinalIgnoreCase) 
+            ? response.ResultSql 
+            : request.SqlInput;
+        response.MermaidErDiagram = _schemaVisualizerService.GenerateMermaidErDiagram(erSourceSql);
 
         // Populate Multi-Engine Transpilations for instant preview
         if (!string.IsNullOrWhiteSpace(response.ResultSql))

@@ -31,6 +31,19 @@ public class SqlParserService : ISqlParserService
         @"^(INT|BIGINT|SMALLINT|TINYINT|BIT|DECIMAL(?:\(\d+(?:,\s*\d+)?\))?|NUMERIC(?:\(\d+(?:,\s*\d+)?\))?|MONEY|SMALLMONEY|FLOAT(?:\(\d+\))?|REAL|DATE|DATETIME|DATETIME2(?:\(\d+\))?|DATETIMEOFFSET(?:\(\d+\))?|TIME(?:\(\d+\))?|CHAR(?:\(\d+\))?|VARCHAR(?:\(\d+|MAX\))?|TEXT|NCHAR(?:\(\d+\))?|NVARCHAR(?:\(\d+|MAX\))?|NTEXT|BINARY(?:\(\d+\))?|VARBINARY(?:\(\d+|MAX\))?|IMAGE|UNIQUEIDENTIFIER|XML|ROWVERSION)$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    private static readonly Regex NaturalLanguageTableNameRegex = new(
+        @"\b(?:table\s+name\s+is|table\s*name\s*[:=]|table\s+named|table\s+called|create\s+(?:a\s+)?table\s+named|create\s+(?:a\s+)?table\s+name\s+is|create\s+(?:a\s+)?table)\s+\[?([a-zA-Z0-9_]+)\]?",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static readonly Regex NaturalLanguageColumnsRegex = new(
+        @"\b(?:column[s]?\s*nme|column[s]?\s*name[s]?|column[s]?|fields|attributes)\s*(?:are|is|[:=])\s*([a-zA-Z0-9_,\s]+?)(?:\s+(?:and\s+plea|and\s+with|please|pleaase|where|having|for\s+this)|$)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static readonly HashSet<string> ReservedWordsFilter = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "a", "an", "the", "table", "column", "columns", "name", "nme", "and", "or", "with", "please", "pleaase", "is", "are", "this"
+    };
+
     public SqlValidationResult ValidateAndParse(string sqlScript)
     {
         var result = new SqlValidationResult();
@@ -107,7 +120,17 @@ public class SqlParserService : ISqlParserService
             return null;
 
         var match = TableNameRegex.Match(sqlScript);
-        return match.Success ? match.Groups[1].Value : null;
+        if (match.Success) return match.Groups[1].Value;
+
+        var nlMatch = NaturalLanguageTableNameRegex.Match(sqlScript);
+        if (nlMatch.Success)
+        {
+            var candidate = nlMatch.Groups[1].Value;
+            if (!ReservedWordsFilter.Contains(candidate))
+                return candidate;
+        }
+
+        return null;
     }
 
     public TableMetadata ExtractTableMetadata(string sqlScript)
@@ -116,6 +139,7 @@ public class SqlParserService : ISqlParserService
         if (string.IsNullOrWhiteSpace(sqlScript))
             return meta;
 
+        // 1. Extract Table Name
         var tableMatch = TableNameRegex.Match(sqlScript);
         if (tableMatch.Success)
         {
@@ -124,11 +148,20 @@ public class SqlParserService : ISqlParserService
         }
         else
         {
-            meta.TableName = "TargetTable";
-            meta.PrimaryKeyColumn = "TargetTableID";
+            var nlTableMatch = NaturalLanguageTableNameRegex.Match(sqlScript);
+            if (nlTableMatch.Success && !ReservedWordsFilter.Contains(nlTableMatch.Groups[1].Value))
+            {
+                meta.TableName = nlTableMatch.Groups[1].Value;
+                meta.PrimaryKeyColumn = $"{meta.TableName}ID";
+            }
+            else
+            {
+                meta.TableName = "TargetTable";
+                meta.PrimaryKeyColumn = "TargetTableID";
+            }
         }
 
-        // Parse column definitions dynamically from SQL text
+        // 2. Parse column definitions dynamically from SQL text (DDL format)
         using var reader = new StringReader(sqlScript);
         string? line;
         while ((line = reader.ReadLine()) != null)
@@ -185,7 +218,47 @@ public class SqlParserService : ISqlParserService
             }
         }
 
-        // Generic fallback columns if no SQL columns were found in the input
+        // 3. Natural Language Column Extraction fallback
+        if (meta.Columns.Count == 0)
+        {
+            var nlColsMatch = NaturalLanguageColumnsRegex.Match(sqlScript);
+            if (nlColsMatch.Success)
+            {
+                var rawCols = nlColsMatch.Groups[1].Value;
+                var tokens = rawCols.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                bool pkAssigned = false;
+
+                foreach (var token in tokens)
+                {
+                    var cleanCol = token.Trim('[', ']', ' ', '\t', '\r', '\n');
+                    if (string.IsNullOrWhiteSpace(cleanCol) || ReservedWordsFilter.Contains(cleanCol))
+                        continue;
+
+                    bool isPk = !pkAssigned && (cleanCol.Equals("id", StringComparison.OrdinalIgnoreCase) || 
+                                                cleanCol.EndsWith("id", StringComparison.OrdinalIgnoreCase) || 
+                                                cleanCol.Equals($"{meta.TableName}ID", StringComparison.OrdinalIgnoreCase));
+
+                    var inferredType = InferDataType(cleanCol);
+
+                    if (isPk)
+                    {
+                        pkAssigned = true;
+                        meta.PrimaryKeyColumn = cleanCol;
+                    }
+
+                    meta.Columns.Add(new ColumnMetadata
+                    {
+                        Name = cleanCol,
+                        DataType = inferredType,
+                        IsPrimaryKey = isPk,
+                        IsIdentity = isPk,
+                        IsNullable = !isPk
+                    });
+                }
+            }
+        }
+
+        // 4. Generic fallback columns if no SQL or natural language columns were found
         if (meta.Columns.Count == 0)
         {
             meta.Columns.Add(new ColumnMetadata { Name = meta.PrimaryKeyColumn, DataType = "INT", IsPrimaryKey = true, IsIdentity = true, IsNullable = false });
@@ -194,8 +267,31 @@ public class SqlParserService : ISqlParserService
             meta.Columns.Add(new ColumnMetadata { Name = "Description", DataType = "NVARCHAR(500)", IsNullable = true });
             meta.Columns.Add(new ColumnMetadata { Name = "Status", DataType = "VARCHAR(30)", IsNullable = false });
         }
+        else if (!meta.Columns.Any(c => c.IsPrimaryKey))
+        {
+            // Ensure at least one PK exists
+            var firstCol = meta.Columns[0];
+            firstCol.IsPrimaryKey = true;
+            firstCol.IsIdentity = firstCol.DataType.Equals("INT", StringComparison.OrdinalIgnoreCase);
+            firstCol.IsNullable = false;
+            meta.PrimaryKeyColumn = firstCol.Name;
+        }
 
         return meta;
+    }
+
+    private static string InferDataType(string colName)
+    {
+        var lower = colName.ToLowerInvariant();
+        if (lower == "id" || lower.EndsWith("id") || lower.EndsWith("_id")) return "INT";
+        if (lower.Contains("email") || lower.Contains("mail")) return "NVARCHAR(150)";
+        if (lower.Contains("name") || lower.Contains("desc") || lower.Contains("title") || lower.Contains("address") || lower.Contains("city") || lower.Contains("country")) return "NVARCHAR(150)";
+        if (lower.Contains("num") || lower.Contains("phone") || lower.Contains("mobile") || lower.Contains("roll") || lower.Contains("code") || lower.Contains("zip") || lower.Contains("pin") || lower.Contains("contact")) return "NVARCHAR(50)";
+        if (lower.Contains("date") || lower.Contains("dob") || lower.Contains("time")) return "DATETIME2(7)";
+        if (lower.Contains("amount") || lower.Contains("price") || lower.Contains("salary") || lower.Contains("fee") || lower.Contains("total") || lower.Contains("cost")) return "DECIMAL(18,2)";
+        if (lower.Contains("isactive") || lower.Contains("isdeleted") || lower.Contains("flag") || lower.StartsWith("is") || lower.StartsWith("has")) return "BIT";
+        if (lower.Contains("status") || lower.Contains("type") || lower.Contains("gender")) return "VARCHAR(30)";
+        return "NVARCHAR(100)";
     }
 
     private static string GenerateScriptFromFragment(TSqlFragment fragment)
